@@ -9,6 +9,8 @@ const {
     Notice,
 } = require("obsidian");
 
+const MINIMAP_BOTTOM_OVERSCROLL_RATIO = 0.5;
+
 class MinimapSettingTab extends PluginSettingTab {
     constructor(plugin) {
         super(plugin.app, plugin);
@@ -572,6 +574,7 @@ class Minimap {
     destroy() {
         this.scroller.removeEventListener("scroll", this.updateSliderScroll);
         this.slider.removeEventListener("mousedown", this.onSliderMouseDown);
+        this.iframe?.removeEventListener("load", this.onIframeLoad);
         this.container.removeEventListener("mousedown", this.onMinimapMouseDown);
         this.container.removeEventListener("wheel", this.onMinimapWheel);
         document.removeEventListener("mousemove", this.onSliderMouseMove);
@@ -617,9 +620,17 @@ class Minimap {
     async onResize() {
         await sleep(300);
 
+        const visibleHeight = this.scroller.getBoundingClientRect().height;
+        this.bottomOverscrollHeight = Math.round(
+            visibleHeight * MINIMAP_BOTTOM_OVERSCROLL_RATIO
+        );
+        const sizerHeight =
+            this.scroller.firstChild?.getBoundingClientRect().height || 0;
+        const scrollHeight = this.scroller.scrollHeight || 0;
+
         this.resize(
-            this.scroller.firstChild.getBoundingClientRect().height,
-            this.scroller.getBoundingClientRect().height
+            Math.max(sizerHeight + this.bottomOverscrollHeight, scrollHeight),
+            visibleHeight
         );
     }
     resize(fullHeight, visibleHeight) {
@@ -643,6 +654,8 @@ class Minimap {
 
         this.iframe = document.createElement("iframe");
         this.iframe.className = "minimap-frame";
+        this.onIframeLoad = this.onIframeLoad.bind(this);
+        this.iframe.addEventListener("load", this.onIframeLoad);
         this.container.appendChild(this.iframe);
 
         this.overlay = document.createElement("div");
@@ -678,20 +691,42 @@ class Minimap {
             : "theme-light";
 
         const cssVars = this.plugin.getCssVars();
+        const bottomOverscrollHeight = Math.max(
+            0,
+            Math.round(this.bottomOverscrollHeight || 0)
+        );
 
         const html = `
 		<!DOCTYPE html>
 		<html>
-		<head>${stylesHTML}<style>${cssVars}</style></head>
+		<head>${stylesHTML}<style>${cssVars}
+        .cursor-minimap-bottom-overscroll {
+            height: ${bottomOverscrollHeight}px;
+            background: #161616;
+            flex: 0 0 auto;
+        }
+        </style></head>
 		<body style="background-color:${this.backgroundColor}" class="${themeClass} ${
             this.isReadModeActive() ? "" : "markdown-preview-view"
-        } show-inline-title">${noteContent.innerHTML}</body>
+        } show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
 		</html>
 	`;
 
         if (this.iframe && html !== this.lastIframeHTML) {
             this.lastIframeHTML = html;
             this.iframe.srcdoc = html;
+        }
+    }
+
+    onIframeLoad() {
+        const body = this.iframe?.contentDocument?.body;
+        if (!body || !this.visibleHeight) return;
+        const iframeContentHeight = Math.max(
+            body.scrollHeight || 0,
+            body.getBoundingClientRect?.().height || 0
+        );
+        if (iframeContentHeight > (this.fullHeight || 0) + 2) {
+            this.resize(iframeContentHeight, this.visibleHeight);
         }
     }
 
@@ -748,7 +783,7 @@ class Minimap {
             // We can just use MarkdownRenderer.render() directly to load all content
             return await renderReadMode(this.plugin, this.element);
         }
-        return await renderEditMode(this.helperElement, this.scroller);
+        return await renderEditMode(this.plugin, this.element, this.helperElement, this.scroller);
     }
 
     onSliderMouseDown(e) {
@@ -928,7 +963,38 @@ async function renderReadMode(plugin, structureNode) {
         destination.insertBefore(titleElement, destination.firstChild);
     return structure;
 }
-async function renderEditMode(helperElement, scroller) {
+async function renderEditMode(plugin, sourceElement, helperElement, scroller) {
+    const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    const matchingView =
+        plugin.app.workspace
+            .getLeavesOfType("markdown")
+            .map((leaf) => leaf.view)
+            .find((view) => view.contentEl === sourceElement) || activeView;
+    const file = matchingView?.file || plugin.app.workspace.getActiveFile();
+    if (file) {
+        const noteContent = document.createElement("div");
+        noteContent.className = "markdown-reading-view";
+        const preview = document.createElement("div");
+        preview.className = "markdown-preview-view markdown-rendered";
+        const destination = document.createElement("div");
+        destination.className = "markdown-preview-sizer markdown-preview-section";
+        preview.appendChild(destination);
+        noteContent.appendChild(preview);
+
+        const markdown =
+            typeof matchingView?.getViewData === "function"
+                ? await matchingView.getViewData()
+                : await plugin.app.vault.read(file);
+        await MarkdownRenderer.render(
+            plugin.app,
+            markdown,
+            destination,
+            file.path,
+            plugin
+        );
+        return noteContent;
+    }
+
     let noteContent;
     if (helperElement) {
         // Better Rendering: use helper note if available
