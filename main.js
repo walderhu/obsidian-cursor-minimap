@@ -38,6 +38,7 @@ class MinimapController {
     this.root.addEventListener("pointerdown", this.boundPointerDown);
     window.addEventListener("pointermove", this.boundPointerMove, true);
     window.addEventListener("pointerup", this.boundPointerUp, true);
+    window.addEventListener("wheel", this.boundWheel, { capture: true, passive: false });
     this.root.addEventListener("wheel", this.boundWheel, { capture: true, passive: false });
     this.scheduleRefresh();
   }
@@ -50,6 +51,7 @@ class MinimapController {
     this.root?.removeEventListener("wheel", this.boundWheel, true);
     window.removeEventListener("pointermove", this.boundPointerMove, true);
     window.removeEventListener("pointerup", this.boundPointerUp, true);
+    window.removeEventListener("wheel", this.boundWheel, true);
     this.root?.remove();
     this.root = null;
     this.canvas = null;
@@ -59,8 +61,13 @@ class MinimapController {
   }
 
   getScroller() {
-    return this.view.containerEl.querySelector(".cm-scroller")
-      || this.view.containerEl.querySelector(".markdown-preview-view");
+    const candidates = [
+      this.view.containerEl.querySelector(".cm-scroller"),
+      this.view.containerEl.querySelector(".markdown-preview-view"),
+      this.view.containerEl.querySelector(".markdown-reading-view"),
+      this.view.containerEl.querySelector(".view-content")
+    ].filter(Boolean);
+    return candidates.find((el) => el.scrollHeight > el.clientHeight + 1) || candidates[0] || null;
   }
 
   setScroller(scroller) {
@@ -392,6 +399,7 @@ class MinimapController {
   }
 
   onWheel(event) {
+    if (!this.isEventOverMinimap(event)) return;
     const scroller = this.getActiveScroller();
     if (!scroller) return;
     event.preventDefault();
@@ -427,6 +435,16 @@ class MinimapController {
     if (event.deltaMode === 1) return event.deltaY * 40;
     if (event.deltaMode === 2) return event.deltaY * Math.max(1, scroller.clientHeight);
     return event.deltaY;
+  }
+
+  isEventOverMinimap(event) {
+    if (!this.root || !this.root.isConnected) return false;
+    if (event.target instanceof Element && this.root.contains(event.target)) return true;
+    const rect = this.root.getBoundingClientRect();
+    return event.clientX >= rect.left
+      && event.clientX <= rect.right
+      && event.clientY >= rect.top
+      && event.clientY <= rect.bottom;
   }
 }
 
