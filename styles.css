@@ -1,9 +1,24 @@
 .cursor-minimap-host {
   position: relative;
+  --cursor-minimap-width: 116px;
+  --cursor-minimap-gap: 18px;
+  --cursor-minimap-reserved: calc(var(--cursor-minimap-width) + var(--cursor-minimap-gap));
 }
 
 .cursor-minimap-host .cm-scroller {
-  padding-right: 126px;
+  padding-right: var(--cursor-minimap-reserved) !important;
+  box-sizing: border-box;
+}
+
+.cursor-minimap-host .cm-contentContainer,
+.cursor-minimap-host .cm-content,
+.cursor-minimap-host .cm-lineWrapping {
+  max-width: calc(100% - var(--cursor-minimap-reserved)) !important;
+  box-sizing: border-box;
+}
+
+.cursor-minimap-host .cm-content {
+  padding-right: var(--cursor-minimap-gap) !important;
 }
 
 .cursor-minimap {
@@ -11,7 +26,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: 116px;
+  width: var(--cursor-minimap-width);
   z-index: 20;
   background: color-mix(in srgb, var(--background-primary) 38%, transparent);
   cursor: pointer;

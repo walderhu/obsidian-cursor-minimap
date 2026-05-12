@@ -17,7 +17,7 @@ class MinimapController {
     this.boundScroll = () => this.scheduleRefresh();
     this.boundPointerDown = (event) => this.onPointerDown(event);
     this.boundPointerMove = (event) => this.onPointerMove(event);
-    this.boundPointerUp = () => this.onPointerUp();
+    this.boundPointerUp = (event) => this.onPointerUp(event);
     this.boundWheel = (event) => this.onWheel(event);
   }
 
@@ -271,6 +271,8 @@ class MinimapController {
 
   onPointerDown(event) {
     event.preventDefault();
+    event.stopPropagation();
+    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
     this.root?.setPointerCapture?.(event.pointerId);
     this.dragging = true;
     this.jumpToPointer(event);
@@ -279,10 +281,15 @@ class MinimapController {
   onPointerMove(event) {
     if (!this.dragging) return;
     event.preventDefault();
+    event.stopPropagation();
     this.jumpToPointer(event);
   }
 
-  onPointerUp() {
+  onPointerUp(event) {
+    if (this.dragging && event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     this.dragging = false;
   }
 
@@ -295,16 +302,16 @@ class MinimapController {
   }
 
   jumpToPointer(event) {
-    if (!this.root || !this.editor) return;
+    if (!this.root || !this.editor || !this.scroller) return;
     const rect = this.root.getBoundingClientRect();
     const ratio = rect.height <= 0 ? 0 : Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     const targetLine = Math.max(0, Math.min(this.safeLastLine(), Math.round(this.safeLastLine() * ratio)));
+    const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
+    const viewportRatio = Math.min(1, this.scroller.clientHeight / Math.max(1, this.scroller.scrollHeight));
+    const centeredRatio = Math.max(0, Math.min(1, ratio - viewportRatio / 2));
+    this.scroller.scrollTop = maxScroll * centeredRatio;
     this.editor.setCursor({ line: targetLine, ch: 0 });
     this.editor.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } }, true);
-    if (this.scroller) {
-      const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
-      this.scroller.scrollTop = maxScroll * ratio;
-    }
     this.editor.focus();
     this.scheduleRefresh();
   }
