@@ -1,0 +1,9 @@
+{
+  "id": "cursor-minimap",
+  "name": "Cursor Minimap",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Shows a compact editor minimap on the right side of markdown views.",
+  "author": "Local",
+  "isDesktopOnly": true
+}
