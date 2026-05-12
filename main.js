@@ -275,28 +275,41 @@ class MinimapController {
   }
 
   safeLastLine() {
-    if (!this.editor) return Math.max(0, this.lines.length - 1);
-    if (typeof this.editor.lastLine === "function") return this.editor.lastLine();
-    if (typeof this.editor.lineCount === "function") return Math.max(0, this.editor.lineCount() - 1);
     return Math.max(0, this.lines.length - 1);
   }
 
   getLine(lineNo) {
-    if (this.editor && typeof this.editor.getLine === "function") return this.editor.getLine(lineNo) || "";
     return this.lines[lineNo] || "";
   }
 
   readLines() {
+    let lines;
     if (this.editor && typeof this.editor.getLine === "function") {
-      const lastLine = this.safeLastLine();
-      const lines = [];
+      const lastLine = this.editorLastLine();
+      lines = [];
       for (let lineNo = 0; lineNo <= lastLine; lineNo++) {
         lines.push(this.editor.getLine(lineNo) || "");
       }
-      return lines.length ? lines : [""];
+    } else {
+      const data = typeof this.view.getViewData === "function" ? this.view.getViewData() : this.view.data;
+      lines = String(data || "").split(/\r?\n/);
     }
-    const data = typeof this.view.getViewData === "function" ? this.view.getViewData() : this.view.data;
-    return String(data || "").split(/\r?\n/);
+    return this.stripFrontmatter(lines.length ? lines : [""]);
+  }
+
+  editorLastLine() {
+    if (!this.editor) return 0;
+    if (typeof this.editor.lastLine === "function") return this.editor.lastLine();
+    if (typeof this.editor.lineCount === "function") return Math.max(0, this.editor.lineCount() - 1);
+    return 0;
+  }
+
+  stripFrontmatter(lines) {
+    if (!lines.length || String(lines[0]).trim() !== "---") return lines;
+    const endIndex = lines.findIndex((line, index) => index > 0 && /^(\.\.\.|---)\s*$/.test(String(line).trim()));
+    if (endIndex < 0) return lines;
+    const visible = lines.slice(endIndex + 1);
+    return visible.length ? visible : [""];
   }
 
   onPointerDown(event) {
