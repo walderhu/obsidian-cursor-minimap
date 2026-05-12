@@ -940,60 +940,51 @@ function toRGBAAlpha(color, alpha) {
     return color;
 }
 
-async function renderReadMode(plugin, structureNode) {
-    const structure = structureNode.cloneNode(true);
-    structure
-        .querySelectorAll(".view-content > :not(.markdown-reading-view)")
-        .forEach((e) => e.remove());
-    const destination = structure.querySelector(".markdown-preview-sizer");
-    const titleElement = destination
-        .querySelector(".mod-header")
-        ?.cloneNode(true);
-    destination.innerHTML = ""; // clear existing content
-    await MarkdownRenderer.render(
-        plugin.app,
-        await plugin.app.workspace
-            .getActiveFile()
-            .vault.read(plugin.app.workspace.getActiveFile()),
-        destination,
-        plugin.app.workspace.getActiveFile().path,
-        plugin
-    );
-    if (titleElement)
-        destination.insertBefore(titleElement, destination.firstChild);
-    return structure;
-}
-async function renderEditMode(plugin, sourceElement, helperElement, scroller) {
+function getMarkdownViewForElement(plugin, sourceElement) {
     const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-    const matchingView =
+    return (
         plugin.app.workspace
             .getLeavesOfType("markdown")
             .map((leaf) => leaf.view)
-            .find((view) => view.contentEl === sourceElement) || activeView;
-    const file = matchingView?.file || plugin.app.workspace.getActiveFile();
-    if (file) {
-        const noteContent = document.createElement("div");
-        noteContent.className = "markdown-reading-view";
-        const preview = document.createElement("div");
-        preview.className = "markdown-preview-view markdown-rendered";
-        const destination = document.createElement("div");
-        destination.className = "markdown-preview-sizer markdown-preview-section";
-        preview.appendChild(destination);
-        noteContent.appendChild(preview);
+            .find((view) => view.contentEl === sourceElement) || activeView
+    );
+}
 
-        const markdown =
-            typeof matchingView?.getViewData === "function"
-                ? await matchingView.getViewData()
-                : await plugin.app.vault.read(file);
-        await MarkdownRenderer.render(
-            plugin.app,
-            markdown,
-            destination,
-            file.path,
-            plugin
-        );
-        return noteContent;
-    }
+async function renderMarkdownDocument(plugin, sourceElement) {
+    const matchingView = getMarkdownViewForElement(plugin, sourceElement);
+    const file = matchingView?.file || plugin.app.workspace.getActiveFile();
+    if (!file) return null;
+
+    const noteContent = document.createElement("div");
+    noteContent.className = "markdown-reading-view";
+    const preview = document.createElement("div");
+    preview.className = "markdown-preview-view markdown-rendered";
+    const destination = document.createElement("div");
+    destination.className = "markdown-preview-sizer markdown-preview-section";
+    preview.appendChild(destination);
+    noteContent.appendChild(preview);
+
+    const markdown =
+        typeof matchingView?.getViewData === "function"
+            ? await matchingView.getViewData()
+            : await plugin.app.vault.read(file);
+    await MarkdownRenderer.render(
+        plugin.app,
+        markdown,
+        destination,
+        file.path,
+        plugin
+    );
+    return noteContent;
+}
+
+async function renderReadMode(plugin, sourceElement) {
+    return await renderMarkdownDocument(plugin, sourceElement);
+}
+
+async function renderEditMode(plugin, sourceElement, helperElement, scroller) {
+    const renderedDocument = await renderMarkdownDocument(plugin, sourceElement);
+    if (renderedDocument) return renderedDocument;
 
     let noteContent;
     if (helperElement) {
