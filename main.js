@@ -7,6 +7,7 @@ class MinimapController {
     this.plugin = plugin;
     this.view = view;
     this.editor = view.editor;
+    this.lines = [];
     this.root = null;
     this.canvas = null;
     this.ctx = null;
@@ -23,7 +24,7 @@ class MinimapController {
 
   mount() {
     if (!this.view?.containerEl || this.root) return;
-    this.scroller = this.view.containerEl.querySelector(".cm-scroller");
+    this.setScroller(this.getScroller());
     const content = this.view.containerEl.querySelector(".view-content");
     if (!content || !this.scroller) return;
 
@@ -37,8 +38,6 @@ class MinimapController {
     window.addEventListener("pointermove", this.boundPointerMove, true);
     window.addEventListener("pointerup", this.boundPointerUp, true);
     this.root.addEventListener("wheel", this.boundWheel, { passive: false });
-    this.scroller.addEventListener("scroll", this.boundScroll, { passive: true });
-
     this.scheduleRefresh();
   }
 
@@ -58,6 +57,18 @@ class MinimapController {
     this.scroller = null;
   }
 
+  getScroller() {
+    return this.view.containerEl.querySelector(".cm-scroller")
+      || this.view.containerEl.querySelector(".markdown-preview-view");
+  }
+
+  setScroller(scroller) {
+    if (this.scroller === scroller) return;
+    this.scroller?.removeEventListener("scroll", this.boundScroll);
+    this.scroller = scroller;
+    this.scroller?.addEventListener("scroll", this.boundScroll, { passive: true });
+  }
+
   scheduleRefresh() {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => {
@@ -73,8 +84,9 @@ class MinimapController {
       return;
     }
     this.editor = this.view.editor;
-    this.scroller = this.view.containerEl.querySelector(".cm-scroller");
-    if (!this.editor || !this.scroller) return;
+    this.setScroller(this.getScroller());
+    this.lines = this.readLines();
+    if (!this.scroller || !this.lines.length) return;
 
     const rect = this.root.getBoundingClientRect();
     const width = Math.max(1, Math.floor(rect.width));
@@ -100,7 +112,7 @@ class MinimapController {
     const maxColumns = Math.max(30, Math.floor((width - 12) / charWidth));
 
     for (let lineNo = 0; lineNo <= lastLine; lineNo++) {
-      const line = this.editor.getLine(lineNo) || "";
+      const line = this.getLine(lineNo);
       const y = lineNo * rowHeight;
       if (y > height) break;
       this.renderMinimapLine(ctx, line, y, rowHeight, minPaintHeight, charWidth, maxColumns);
@@ -263,9 +275,28 @@ class MinimapController {
   }
 
   safeLastLine() {
+    if (!this.editor) return Math.max(0, this.lines.length - 1);
     if (typeof this.editor.lastLine === "function") return this.editor.lastLine();
     if (typeof this.editor.lineCount === "function") return Math.max(0, this.editor.lineCount() - 1);
-    return 0;
+    return Math.max(0, this.lines.length - 1);
+  }
+
+  getLine(lineNo) {
+    if (this.editor && typeof this.editor.getLine === "function") return this.editor.getLine(lineNo) || "";
+    return this.lines[lineNo] || "";
+  }
+
+  readLines() {
+    if (this.editor && typeof this.editor.getLine === "function") {
+      const lastLine = this.safeLastLine();
+      const lines = [];
+      for (let lineNo = 0; lineNo <= lastLine; lineNo++) {
+        lines.push(this.editor.getLine(lineNo) || "");
+      }
+      return lines.length ? lines : [""];
+    }
+    const data = typeof this.view.getViewData === "function" ? this.view.getViewData() : this.view.data;
+    return String(data || "").split(/\r?\n/);
   }
 
   onPointerDown(event) {
