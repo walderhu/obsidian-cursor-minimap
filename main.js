@@ -306,12 +306,16 @@ class MinimapController {
   refreshViewport(height) {
     if (!this.viewport || !this.scroller) return;
     const clientHeight = Math.max(1, this.scroller.clientHeight);
-    const fullScrollHeight = Math.max(clientHeight, this.scroller.scrollHeight);
-    const maxScroll = Math.max(1, fullScrollHeight - clientHeight);
-    const viewportHeight = Math.max(16, Math.min(height, clientHeight / fullScrollHeight * height));
-    const top = Math.max(0, Math.min(height - viewportHeight, this.scroller.scrollTop / maxScroll * (height - viewportHeight)));
+    const contentHeight = Math.max(clientHeight, this.getEstimatedContentHeight());
+    const viewportHeight = Math.max(20, Math.min(height, clientHeight / contentHeight * height));
+    const top = Math.max(0, Math.min(height - viewportHeight, this.scroller.scrollTop / contentHeight * height));
     this.viewport.style.top = `${Math.min(height - viewportHeight, top)}px`;
     this.viewport.style.height = `${viewportHeight}px`;
+  }
+
+  getEstimatedContentHeight() {
+    const weightedHeight = this.lineWeights.reduce((sum, weight) => sum + Math.max(0, weight || 0), 0);
+    return Math.max(1, weightedHeight || this.scroller?.scrollHeight || 1);
   }
 
   safeLastLine() {
@@ -398,24 +402,27 @@ class MinimapController {
     }
     const plainLength = text.replace(/\s+/g, " ").trim().length;
     const contentWidth = this.getContentWidth();
-    const charsPerLine = Math.max(28, Math.floor(contentWidth / 7.2));
+    const charsPerLine = Math.max(18, Math.floor(contentWidth / this.getAverageCharWidth()));
     const visualLines = Math.max(1, Math.ceil(plainLength / charsPerLine));
-    return baseLineHeight * Math.min(3.4, visualLines);
+    return baseLineHeight * Math.min(8, visualLines);
   }
 
   measureKanbanLineWeight(line, baseLineHeight, collapsed) {
     const text = String(line || "");
     if (collapsed) {
-      if (/\[!todo\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
+      if (/\[!(?:todo|task-kanban)\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
       return baseLineHeight * 0.05;
     }
     if (/task-kanban-inline-marker|task-kanban-inline-card/.test(text)) {
       const cards = Math.max(1, (text.match(/task-kanban-inline-card/g) || []).length);
       const columns = Math.max(1, (text.match(/task-kanban-inline-marker/g) || []).length);
       const rows = Math.ceil(cards / Math.max(1, columns));
-      return baseLineHeight * (3.5 + rows * 2.15);
+      const subtasks = (text.match(/task-kanban-inline-subtask/g) || []).length;
+      const visibleColumns = Math.min(3, columns);
+      const columnRows = Math.ceil(cards / Math.max(1, visibleColumns));
+      return baseLineHeight * (3.9 + columnRows * 2.25 + Math.min(12, subtasks) * 0.42);
     }
-    if (/\[!todo\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
+    if (/\[!(?:todo|task-kanban)\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
     if (/task-kanban-inline-action/.test(text)) return baseLineHeight * 1.6;
     if (/^\s*>\s*$/.test(text)) return baseLineHeight * 0.25;
     return baseLineHeight * 0.9;
@@ -446,8 +453,27 @@ class MinimapController {
   }
 
   getContentWidth() {
-    const width = this.scroller?.clientWidth || this.view.containerEl.clientWidth || 700;
-    return Math.max(260, width - 150);
+    const candidates = [
+      this.view.containerEl.querySelector(".cm-content"),
+      this.view.containerEl.querySelector(".markdown-preview-sizer"),
+      this.view.containerEl.querySelector(".markdown-preview-section"),
+      this.view.containerEl.querySelector(".markdown-preview-view")
+    ].filter(Boolean);
+    const target = candidates.find((el) => el.clientWidth > 0) || this.scroller || this.view.containerEl;
+    const styles = target ? getComputedStyle(target) : null;
+    const paddingLeft = Number.parseFloat(styles?.paddingLeft || "") || 0;
+    const paddingRight = Number.parseFloat(styles?.paddingRight || "") || 0;
+    const width = (target?.clientWidth || this.scroller?.clientWidth || this.view.containerEl.clientWidth || 700) - paddingLeft - paddingRight;
+    return Math.max(180, Math.min(width, this.scroller?.clientWidth || width));
+  }
+
+  getAverageCharWidth() {
+    const target = this.view.containerEl.querySelector(".cm-line")
+      || this.view.containerEl.querySelector(".markdown-preview-view")
+      || this.scroller;
+    const styles = target ? getComputedStyle(target) : null;
+    const fontSize = Number.parseFloat(styles?.fontSize || "") || 16;
+    return Math.max(5.5, fontSize * 0.52);
   }
 
   estimateImageHeight(info, natural) {
@@ -556,7 +582,8 @@ class MinimapController {
     const rect = this.root.getBoundingClientRect();
     const ratio = rect.height <= 0 ? 0 : Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     const maxScroll = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-    scroller.scrollTop = Math.max(0, Math.min(maxScroll, ratio * maxScroll));
+    const estimatedScrollTop = ratio * this.getEstimatedContentHeight();
+    scroller.scrollTop = Math.max(0, Math.min(maxScroll, estimatedScrollTop));
     this.scheduleRefresh();
   }
 
