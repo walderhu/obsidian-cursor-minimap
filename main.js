@@ -1,7 +1,8 @@
 const { Plugin, MarkdownView, Notice } = require("obsidian");
 
 const VIEW_TYPE_MARKDOWN = "markdown";
-const TASK_KANBAN_FIXED_HEIGHT = 500;
+const TASK_KANBAN_PREVIEW_HEIGHT = 380;
+const TASK_KANBAN_SOURCE_HEIGHT = 860;
 
 class MinimapController {
   constructor(plugin, view) {
@@ -420,7 +421,7 @@ class MinimapController {
   }
 
   measureKanbanBlockWeights(lines, baseLineHeight, collapsed) {
-    const total = collapsed ? baseLineHeight * 2.1 : TASK_KANBAN_FIXED_HEIGHT;
+    const total = collapsed ? baseLineHeight * 2.1 : this.getTaskKanbanFixedHeight();
     const weights = lines.map((line) => {
       const text = String(line || "");
       if (text.includes("<!-- task-kanban:start -->") || text.includes("<!-- task-kanban:end -->")) return 0.05;
@@ -453,12 +454,16 @@ class MinimapController {
       return baseLineHeight * 0.05;
     }
     if (/task-kanban-inline-marker|task-kanban-inline-card/.test(text)) {
-      return TASK_KANBAN_FIXED_HEIGHT;
+      return this.getTaskKanbanFixedHeight();
     }
     if (/\[!(?:todo|task-kanban)\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
     if (/task-kanban-inline-action/.test(text)) return baseLineHeight * 1.6;
     if (/^\s*>\s*$/.test(text)) return baseLineHeight * 0.25;
     return baseLineHeight * 0.9;
+  }
+
+  getTaskKanbanFixedHeight() {
+    return this.isPreviewScroller() ? TASK_KANBAN_PREVIEW_HEIGHT : TASK_KANBAN_SOURCE_HEIGHT;
   }
 
   measureWrappedTextWeight(text, baseLineHeight, maxVisualLines = 8) {
