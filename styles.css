@@ -1,19 +1,12 @@
 .cursor-minimap-host {
   position: relative;
   --cursor-minimap-width: 116px;
-  --cursor-minimap-gap: 18px;
+  --cursor-minimap-gap: 10px;
   --cursor-minimap-reserved: calc(var(--cursor-minimap-width) + var(--cursor-minimap-gap));
 }
 
 .cursor-minimap-host .cm-scroller {
   padding-right: var(--cursor-minimap-reserved) !important;
-  box-sizing: border-box;
-}
-
-.cursor-minimap-host .cm-contentContainer,
-.cursor-minimap-host .cm-content,
-.cursor-minimap-host .cm-lineWrapping {
-  max-width: calc(100% - var(--cursor-minimap-reserved)) !important;
   box-sizing: border-box;
 }
 

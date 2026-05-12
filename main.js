@@ -254,11 +254,10 @@ class MinimapController {
 
   refreshViewport(height) {
     if (!this.viewport || !this.scroller) return;
-    const scrollHeight = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
     const clientHeight = Math.max(1, this.scroller.clientHeight);
     const fullScrollHeight = Math.max(clientHeight, this.scroller.scrollHeight);
-    const top = Math.max(0, Math.min(1, this.scroller.scrollTop / Math.max(1, scrollHeight))) * height;
     const viewportHeight = Math.max(16, Math.min(height, clientHeight / fullScrollHeight * height));
+    const top = Math.max(0, Math.min(height - viewportHeight, this.scroller.scrollTop / fullScrollHeight * height));
     this.viewport.style.top = `${Math.min(height - viewportHeight, top)}px`;
     this.viewport.style.height = `${viewportHeight}px`;
   }
@@ -306,9 +305,8 @@ class MinimapController {
     const rect = this.root.getBoundingClientRect();
     const ratio = rect.height <= 0 ? 0 : Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
-    const viewportRatio = Math.min(1, this.scroller.clientHeight / Math.max(1, this.scroller.scrollHeight));
-    const centeredRatio = Math.max(0, Math.min(1, ratio - viewportRatio / 2));
-    this.scroller.scrollTop = maxScroll * centeredRatio;
+    const fullScrollHeight = Math.max(this.scroller.clientHeight, this.scroller.scrollHeight);
+    this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, ratio * fullScrollHeight));
     this.scheduleRefresh();
   }
 }
