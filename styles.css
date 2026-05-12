@@ -14,6 +14,16 @@
   padding-right: var(--cursor-minimap-gap) !important;
 }
 
+.cursor-minimap-host .markdown-preview-view {
+  padding-right: var(--cursor-minimap-reserved) !important;
+  box-sizing: border-box;
+}
+
+.cursor-minimap-host .markdown-preview-sizer {
+  padding-right: var(--cursor-minimap-gap) !important;
+  box-sizing: border-box;
+}
+
 .cursor-minimap {
   position: absolute;
   top: 0;
@@ -24,6 +34,9 @@
   background: color-mix(in srgb, var(--background-primary) 38%, transparent);
   cursor: pointer;
   opacity: 0.72;
+  pointer-events: auto;
+  touch-action: none;
+  overscroll-behavior: contain;
   transition: opacity 120ms ease;
   overflow: hidden;
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--background-modifier-border) 34%, transparent);
@@ -51,6 +64,6 @@
 }
 
 .is-mobile .cursor-minimap,
-.markdown-preview-view .cursor-minimap {
+.cursor-minimap-host:not(:has(.cm-scroller)):not(:has(.markdown-preview-view)) .cursor-minimap {
   display: none;
 }

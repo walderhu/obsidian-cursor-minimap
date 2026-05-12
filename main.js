@@ -142,6 +142,10 @@ class MinimapController {
       this.renderImageBlock(ctx, line, y, rowHeight, minPaintHeight);
       return;
     }
+    if (lineType === "kanban") {
+      this.renderKanbanBlock(ctx, y, rowHeight, minPaintHeight);
+      return;
+    }
     const h = Math.max(minPaintHeight, Math.min(2, rowHeight));
     const baseAlpha = rowHeight < 0.8 ? 0.34 : rowHeight < 1.4 ? 0.42 : 0.58;
     let xPad = 5;
@@ -185,7 +189,7 @@ class MinimapController {
 
   renderImageBlock(ctx, line, y, rowHeight, minPaintHeight) {
     const p = this.palette || this.readPalette();
-    const h = Math.max(minPaintHeight, Math.min(36, Math.max(rowHeight - 1, minPaintHeight)));
+    const h = Math.max(minPaintHeight, Math.max(rowHeight - 1, minPaintHeight));
     const top = Math.floor(y);
     const left = 7;
     const width = 104;
@@ -204,7 +208,29 @@ class MinimapController {
     }
   }
 
+  renderKanbanBlock(ctx, y, rowHeight, minPaintHeight) {
+    const p = this.palette || this.readPalette();
+    const top = Math.floor(y);
+    const h = Math.max(minPaintHeight, rowHeight - 1);
+    const left = 6;
+    const width = 106;
+    ctx.fillStyle = p.imageBg;
+    ctx.fillRect(left, top, width, h);
+    ctx.fillStyle = p.accent(0.36);
+    ctx.fillRect(left, top, 3, h);
+    ctx.fillStyle = p.normal(0.34);
+    const rows = Math.max(2, Math.min(12, Math.floor(h / 7)));
+    for (let row = 0; row < rows; row++) {
+      const yRow = top + 4 + row * 7;
+      if (yRow > top + h - 2) break;
+      ctx.fillRect(left + 8, yRow, 24, 2);
+      ctx.fillRect(left + 38, yRow, 24, 2);
+      ctx.fillRect(left + 68, yRow, 24, 2);
+    }
+  }
+
   getLineType(line) {
+    if (/task-kanban-inline-marker|task-kanban-inline-card/.test(line)) return "kanban";
     if (/!\[\[.+?\]\]|!\[.*?\]\(.+?\)|\[\[.+?\.(png|jpe?g|gif|webp|svg|bmp|avif).*?\]\]/i.test(line)) return "image";
     if (/^\s{0,3}#{1,6}\s+/.test(line)) return "heading";
     if (/^\s*[-*]\s+\[[ xX-]\]/.test(line)) return "task";
@@ -309,7 +335,7 @@ class MinimapController {
       lines = String(data || "").split(/\r?\n/);
     }
     lines = lines.length ? lines : [""];
-    return this.isPreviewScroller() ? this.stripFrontmatter(lines) : lines;
+    return this.stripFrontmatter(lines);
   }
 
   editorLastLine() {
@@ -328,49 +354,158 @@ class MinimapController {
   }
 
   isPreviewScroller() {
-    return !!this.scroller?.classList?.contains("markdown-preview-view");
+    return !!this.scroller?.classList?.contains("markdown-preview-view")
+      || !!this.scroller?.classList?.contains("markdown-reading-view");
   }
 
   measureLineWeights(lines) {
-    return lines.map((line) => this.measureLineWeight(line));
+    const baseLineHeight = this.getBaseLineHeight();
+    const weights = [];
+    let insideKanban = false;
+    let kanbanCollapsed = false;
+    for (const line of lines) {
+      const text = String(line || "");
+      if (text.includes("<!-- task-kanban:start -->")) {
+        insideKanban = true;
+        kanbanCollapsed = this.isTaskKanbanCollapsed();
+        weights.push(baseLineHeight * 0.2);
+        continue;
+      }
+      if (text.includes("<!-- task-kanban:end -->")) {
+        insideKanban = false;
+        kanbanCollapsed = false;
+        weights.push(baseLineHeight * 0.2);
+        continue;
+      }
+      if (insideKanban) {
+        weights.push(this.measureKanbanLineWeight(text, baseLineHeight, kanbanCollapsed));
+        continue;
+      }
+      weights.push(this.measureLineWeight(text, baseLineHeight));
+    }
+    return weights;
   }
 
-  measureLineWeight(line) {
+  measureLineWeight(line, baseLineHeight) {
     const text = String(line || "");
     const type = this.getLineType(text);
-    if (!text.trim()) return 0.82;
-    if (type === "image") return this.measureImageWeight(text);
+    if (!text.trim()) return baseLineHeight * 0.82;
+    if (type === "kanban") return this.measureKanbanLineWeight(text, baseLineHeight, this.isTaskKanbanCollapsed());
+    if (type === "image") return this.measureImageWeight(text, baseLineHeight);
     if (type === "heading") {
       const level = text.match(/^\s{0,3}(#{1,6})\s+/)?.[1].length || 6;
-      return level <= 1 ? 2.1 : level === 2 ? 1.75 : 1.35;
+      return baseLineHeight * (level <= 1 ? 2.1 : level === 2 ? 1.75 : 1.35);
     }
     const plainLength = text.replace(/\s+/g, " ").trim().length;
-    const wrapWeight = Math.min(2.4, Math.floor(Math.max(0, plainLength - 95) / 85) * 0.55);
-    return 1 + wrapWeight;
+    const contentWidth = this.getContentWidth();
+    const charsPerLine = Math.max(28, Math.floor(contentWidth / 7.2));
+    const visualLines = Math.max(1, Math.ceil(plainLength / charsPerLine));
+    return baseLineHeight * Math.min(3.4, visualLines);
   }
 
-  measureImageWeight(line) {
-    const size = this.extractImageSize(line);
-    if (!size) return 8;
-    const visualHeight = size.height || size.width || 180;
-    return Math.max(5, Math.min(24, visualHeight / 18));
+  measureKanbanLineWeight(line, baseLineHeight, collapsed) {
+    const text = String(line || "");
+    if (collapsed) {
+      if (/\[!todo\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
+      return baseLineHeight * 0.05;
+    }
+    if (/task-kanban-inline-marker|task-kanban-inline-card/.test(text)) {
+      const cards = Math.max(1, (text.match(/task-kanban-inline-card/g) || []).length);
+      const columns = Math.max(1, (text.match(/task-kanban-inline-marker/g) || []).length);
+      const rows = Math.ceil(cards / Math.max(1, columns));
+      return baseLineHeight * (3.5 + rows * 2.15);
+    }
+    if (/\[!todo\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
+    if (/task-kanban-inline-action/.test(text)) return baseLineHeight * 1.6;
+    if (/^\s*>\s*$/.test(text)) return baseLineHeight * 0.25;
+    return baseLineHeight * 0.9;
   }
 
-  extractImageSize(line) {
-    const pipeSize = String(line).match(/\|(\d{2,4})(?:x(\d{2,4}))?(?=[\]\)])/i);
-    if (pipeSize) {
+  isTaskKanbanCollapsed() {
+    if (!this.isPreviewScroller()) return false;
+    return !!this.view.containerEl.querySelector(
+      ".callout.is-collapsed:has(.task-kanban-inline-marker), .callout[data-callout-fold='-']:has(.task-kanban-inline-marker)"
+    );
+  }
+
+  measureImageWeight(line, baseLineHeight) {
+    const info = this.extractImageInfo(line);
+    const natural = info?.path ? this.getImageNaturalSize(info.path) : null;
+    const visualHeight = this.estimateImageHeight(info, natural);
+    return Math.max(baseLineHeight * 1.4, visualHeight + baseLineHeight * 0.7);
+  }
+
+  getBaseLineHeight() {
+    const target = this.view.containerEl.querySelector(".cm-line")
+      || this.view.containerEl.querySelector(".markdown-preview-view")
+      || this.scroller;
+    const styles = target ? getComputedStyle(target) : null;
+    const fontSize = Number.parseFloat(styles?.fontSize || "") || 16;
+    const lineHeight = Number.parseFloat(styles?.lineHeight || "");
+    return Number.isFinite(lineHeight) ? lineHeight : fontSize * 1.45;
+  }
+
+  getContentWidth() {
+    const width = this.scroller?.clientWidth || this.view.containerEl.clientWidth || 700;
+    return Math.max(260, width - 150);
+  }
+
+  estimateImageHeight(info, natural) {
+    const contentWidth = this.getContentWidth();
+    const maxWidth = Math.max(80, contentWidth - 24);
+    if (info?.height) return Math.min(info.height, maxWidth * 1.5);
+    const requestedWidth = info?.width || Math.min(420, maxWidth);
+    const visualWidth = Math.min(requestedWidth, maxWidth);
+    if (natural?.width && natural?.height) {
+      return Math.max(24, visualWidth * natural.height / natural.width);
+    }
+    if (info?.width) return info.width;
+    return 220;
+  }
+
+  extractImageInfo(line) {
+    const raw = String(line);
+    const wiki = raw.match(/!\[\[([^|\]#]+)(?:#[^|\]]*)?(?:\|(\d{2,4})(?:x(\d{2,4}))?)?\]\]/i);
+    if (wiki) {
       return {
-        width: Number(pipeSize[1]),
-        height: pipeSize[2] ? Number(pipeSize[2]) : Number(pipeSize[1])
+        path: wiki[1].trim(),
+        width: wiki[2] ? Number(wiki[2]) : null,
+        height: wiki[3] ? Number(wiki[3]) : null
       };
     }
-    const markdownSize = String(line).match(/=(\d{2,4})x(\d{0,4})(?=[\)\]])/i);
-    if (markdownSize) {
+    const markdown = raw.match(/!\[[^\]]*]\(([^)\s]+)(?:\s*=\s*(\d{2,4})x(\d{0,4}))?\)/i);
+    if (markdown) {
       return {
-        width: Number(markdownSize[1]),
-        height: markdownSize[2] ? Number(markdownSize[2]) : Number(markdownSize[1])
+        path: decodeURIComponent(markdown[1].trim()),
+        width: markdown[2] ? Number(markdown[2]) : null,
+        height: markdown[3] ? Number(markdown[3]) : null
       };
     }
+    return null;
+  }
+
+  getImageNaturalSize(path) {
+    if (!this.plugin.imageSizes) this.plugin.imageSizes = new Map();
+    const cacheKey = `${this.view.file?.path || ""}::${path}`;
+    const cached = this.plugin.imageSizes.get(cacheKey);
+    if (cached && cached.status === "loaded") return cached;
+    if (cached && cached.status === "loading") return null;
+
+    const file = this.plugin.app.metadataCache.getFirstLinkpathDest(path, this.view.file?.path || "");
+    if (!file) return null;
+    const src = this.plugin.app.vault.getResourcePath(file);
+    this.plugin.imageSizes.set(cacheKey, { status: "loading" });
+    const image = new Image();
+    image.onload = () => {
+      this.plugin.imageSizes.set(cacheKey, {
+        status: "loaded",
+        width: image.naturalWidth,
+        height: image.naturalHeight
+      });
+      this.scheduleRefresh();
+    };
+    image.onerror = () => this.plugin.imageSizes.set(cacheKey, { status: "error" });
+    image.src = src;
     return null;
   }
 
@@ -451,6 +586,7 @@ class MinimapController {
 module.exports = class CursorMinimapPlugin extends Plugin {
   async onload() {
     this.controllers = new Map();
+    this.imageSizes = new Map();
     this.enabled = true;
 
     this.addCommand({
