@@ -302,17 +302,13 @@ class MinimapController {
   }
 
   jumpToPointer(event) {
-    if (!this.root || !this.editor || !this.scroller) return;
+    if (!this.root || !this.scroller) return;
     const rect = this.root.getBoundingClientRect();
     const ratio = rect.height <= 0 ? 0 : Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    const targetLine = Math.max(0, Math.min(this.safeLastLine(), Math.round(this.safeLastLine() * ratio)));
     const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
     const viewportRatio = Math.min(1, this.scroller.clientHeight / Math.max(1, this.scroller.scrollHeight));
     const centeredRatio = Math.max(0, Math.min(1, ratio - viewportRatio / 2));
     this.scroller.scrollTop = maxScroll * centeredRatio;
-    this.editor.setCursor({ line: targetLine, ch: 0 });
-    this.editor.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } }, true);
-    this.editor.focus();
     this.scheduleRefresh();
   }
 }
