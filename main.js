@@ -38,7 +38,7 @@ class MinimapController {
     this.root.addEventListener("pointerdown", this.boundPointerDown);
     window.addEventListener("pointermove", this.boundPointerMove, true);
     window.addEventListener("pointerup", this.boundPointerUp, true);
-    this.root.addEventListener("wheel", this.boundWheel, { passive: false });
+    this.root.addEventListener("wheel", this.boundWheel, { capture: true, passive: false });
     this.scheduleRefresh();
   }
 
@@ -47,7 +47,7 @@ class MinimapController {
     this.raf = 0;
     this.scroller?.removeEventListener("scroll", this.boundScroll);
     this.root?.removeEventListener("pointerdown", this.boundPointerDown);
-    this.root?.removeEventListener("wheel", this.boundWheel);
+    this.root?.removeEventListener("wheel", this.boundWheel, true);
     window.removeEventListener("pointermove", this.boundPointerMove, true);
     window.removeEventListener("pointerup", this.boundPointerUp, true);
     this.root?.remove();
@@ -392,20 +392,41 @@ class MinimapController {
   }
 
   onWheel(event) {
-    if (!this.scroller) return;
+    const scroller = this.getActiveScroller();
+    if (!scroller) return;
     event.preventDefault();
     event.stopPropagation();
-    this.scroller.scrollTop += event.deltaY;
+    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    const deltaY = this.normalizeWheelDelta(event, scroller);
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const nextTop = Math.max(0, Math.min(maxScroll, scroller.scrollTop + deltaY));
+    scroller.scrollTop = nextTop;
+    if (scroller.scrollTop !== nextTop && typeof scroller.scrollBy === "function") {
+      scroller.scrollBy({ top: deltaY, left: 0, behavior: "auto" });
+    }
     this.scheduleRefresh();
   }
 
   jumpToPointer(event) {
-    if (!this.root || !this.scroller) return;
+    const scroller = this.getActiveScroller();
+    if (!this.root || !scroller) return;
     const rect = this.root.getBoundingClientRect();
     const ratio = rect.height <= 0 ? 0 : Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
-    this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, ratio * maxScroll));
+    const maxScroll = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+    scroller.scrollTop = Math.max(0, Math.min(maxScroll, ratio * maxScroll));
     this.scheduleRefresh();
+  }
+
+  getActiveScroller() {
+    const scroller = this.getScroller();
+    this.setScroller(scroller);
+    return this.scroller;
+  }
+
+  normalizeWheelDelta(event, scroller) {
+    if (event.deltaMode === 1) return event.deltaY * 40;
+    if (event.deltaMode === 2) return event.deltaY * Math.max(1, scroller.clientHeight);
+    return event.deltaY;
   }
 }
 
