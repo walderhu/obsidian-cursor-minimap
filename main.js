@@ -8,6 +8,7 @@ class MinimapController {
     this.view = view;
     this.editor = view.editor;
     this.lines = [];
+    this.lineWeights = [];
     this.root = null;
     this.canvas = null;
     this.ctx = null;
@@ -86,6 +87,7 @@ class MinimapController {
     this.editor = this.view.editor;
     this.setScroller(this.getScroller());
     this.lines = this.readLines();
+    this.lineWeights = this.measureLineWeights(this.lines);
     if (!this.scroller || !this.lines.length) return;
 
     const rect = this.root.getBoundingClientRect();
@@ -106,16 +108,20 @@ class MinimapController {
 
     const lastLine = this.safeLastLine();
     const lineCount = Math.max(1, lastLine + 1);
-    const rowHeight = height / lineCount;
-    const minPaintHeight = lineCount > height * 1.5 ? 0.55 : Math.max(0.75, Math.min(2, rowHeight));
+    const totalWeight = Math.max(1, this.lineWeights.reduce((sum, weight) => sum + weight, 0));
+    const weightHeight = height / totalWeight;
+    const averageRowHeight = height / lineCount;
+    const minPaintHeight = lineCount > height * 1.5 ? 0.55 : Math.max(0.75, Math.min(2, averageRowHeight));
     const charWidth = lineCount > 1800 ? 1.05 : lineCount > 900 ? 1.25 : 1.55;
     const maxColumns = Math.max(30, Math.floor((width - 12) / charWidth));
 
+    let y = 0;
     for (let lineNo = 0; lineNo <= lastLine; lineNo++) {
       const line = this.getLine(lineNo);
-      const y = lineNo * rowHeight;
+      const rowHeight = Math.max(0.25, (this.lineWeights[lineNo] || 1) * weightHeight);
       if (y > height) break;
       this.renderMinimapLine(ctx, line, y, rowHeight, minPaintHeight, charWidth, maxColumns);
+      y += rowHeight;
     }
 
     this.refreshViewport(height);
@@ -172,7 +178,7 @@ class MinimapController {
 
   renderImageBlock(ctx, line, y, rowHeight, minPaintHeight) {
     const p = this.palette || this.readPalette();
-    const h = Math.max(minPaintHeight, Math.min(24, Math.max(rowHeight * 8, minPaintHeight)));
+    const h = Math.max(minPaintHeight, Math.min(36, Math.max(rowHeight - 1, minPaintHeight)));
     const top = Math.floor(y);
     const left = 7;
     const width = 104;
@@ -268,8 +274,9 @@ class MinimapController {
     if (!this.viewport || !this.scroller) return;
     const clientHeight = Math.max(1, this.scroller.clientHeight);
     const fullScrollHeight = Math.max(clientHeight, this.scroller.scrollHeight);
+    const maxScroll = Math.max(1, fullScrollHeight - clientHeight);
     const viewportHeight = Math.max(16, Math.min(height, clientHeight / fullScrollHeight * height));
-    const top = Math.max(0, Math.min(height - viewportHeight, this.scroller.scrollTop / fullScrollHeight * height));
+    const top = Math.max(0, Math.min(height - viewportHeight, this.scroller.scrollTop / maxScroll * (height - viewportHeight)));
     this.viewport.style.top = `${Math.min(height - viewportHeight, top)}px`;
     this.viewport.style.height = `${viewportHeight}px`;
   }
@@ -294,7 +301,8 @@ class MinimapController {
       const data = typeof this.view.getViewData === "function" ? this.view.getViewData() : this.view.data;
       lines = String(data || "").split(/\r?\n/);
     }
-    return this.stripFrontmatter(lines.length ? lines : [""]);
+    lines = lines.length ? lines : [""];
+    return this.isPreviewScroller() ? this.stripFrontmatter(lines) : lines;
   }
 
   editorLastLine() {
@@ -310,6 +318,53 @@ class MinimapController {
     if (endIndex < 0) return lines;
     const visible = lines.slice(endIndex + 1);
     return visible.length ? visible : [""];
+  }
+
+  isPreviewScroller() {
+    return !!this.scroller?.classList?.contains("markdown-preview-view");
+  }
+
+  measureLineWeights(lines) {
+    return lines.map((line) => this.measureLineWeight(line));
+  }
+
+  measureLineWeight(line) {
+    const text = String(line || "");
+    const type = this.getLineType(text);
+    if (!text.trim()) return 0.82;
+    if (type === "image") return this.measureImageWeight(text);
+    if (type === "heading") {
+      const level = text.match(/^\s{0,3}(#{1,6})\s+/)?.[1].length || 6;
+      return level <= 1 ? 2.1 : level === 2 ? 1.75 : 1.35;
+    }
+    const plainLength = text.replace(/\s+/g, " ").trim().length;
+    const wrapWeight = Math.min(2.4, Math.floor(Math.max(0, plainLength - 95) / 85) * 0.55);
+    return 1 + wrapWeight;
+  }
+
+  measureImageWeight(line) {
+    const size = this.extractImageSize(line);
+    if (!size) return 8;
+    const visualHeight = size.height || size.width || 180;
+    return Math.max(5, Math.min(24, visualHeight / 18));
+  }
+
+  extractImageSize(line) {
+    const pipeSize = String(line).match(/\|(\d{2,4})(?:x(\d{2,4}))?(?=[\]\)])/i);
+    if (pipeSize) {
+      return {
+        width: Number(pipeSize[1]),
+        height: pipeSize[2] ? Number(pipeSize[2]) : Number(pipeSize[1])
+      };
+    }
+    const markdownSize = String(line).match(/=(\d{2,4})x(\d{0,4})(?=[\)\]])/i);
+    if (markdownSize) {
+      return {
+        width: Number(markdownSize[1]),
+        height: markdownSize[2] ? Number(markdownSize[2]) : Number(markdownSize[1])
+      };
+    }
+    return null;
   }
 
   onPointerDown(event) {
@@ -349,8 +404,7 @@ class MinimapController {
     const rect = this.root.getBoundingClientRect();
     const ratio = rect.height <= 0 ? 0 : Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
-    const fullScrollHeight = Math.max(this.scroller.clientHeight, this.scroller.scrollHeight);
-    this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, ratio * fullScrollHeight));
+    this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, ratio * maxScroll));
     this.scheduleRefresh();
   }
 }
@@ -392,7 +446,7 @@ module.exports = class CursorMinimapPlugin extends Plugin {
     const seen = new Set();
     for (const leaf of leaves) {
       const view = leaf.view;
-      if (!(view instanceof MarkdownView) || !view.editor) continue;
+      if (!(view instanceof MarkdownView)) continue;
       seen.add(view);
       let controller = this.controllers.get(view);
       if (!controller) {
