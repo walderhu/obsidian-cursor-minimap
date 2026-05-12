@@ -3,6 +3,7 @@ const { Plugin, MarkdownView, Notice } = require("obsidian");
 const VIEW_TYPE_MARKDOWN = "markdown";
 const TASK_KANBAN_PREVIEW_HEIGHT = 380;
 const TASK_KANBAN_SOURCE_HEIGHT = 860;
+const VIEWPORT_HEIGHT_SCALE = 0.72;
 
 class MinimapController {
   constructor(plugin, view) {
@@ -333,7 +334,7 @@ class MinimapController {
     const clientHeight = Math.max(1, this.scroller.clientHeight);
     const contentHeight = Math.max(clientHeight, this.scroller.scrollHeight);
     const maxScroll = Math.max(1, contentHeight - clientHeight);
-    const viewportHeight = Math.max(20, Math.min(height, clientHeight / contentHeight * height));
+    const viewportHeight = Math.max(20, Math.min(height, clientHeight / contentHeight * height * VIEWPORT_HEIGHT_SCALE));
     const correction = this.getViewportTopCorrection();
     const scrollTop = this.scroller.scrollTop >= maxScroll - 1
       ? maxScroll
