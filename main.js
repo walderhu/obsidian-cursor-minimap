@@ -120,6 +120,22 @@ class NoteMinimap extends Plugin {
     updateNeeded = false;
     minimapInstances = new Map(); // element: noteInstance
     stylesHTMLCache = null;
+    cssVarsCache = null;
+
+    getCssVars() {
+        if (this.cssVarsCache) return this.cssVarsCache;
+        const rootStyles = getComputedStyle(document.body);
+        let cssVars = ":root {\n";
+        for (let i = 0; i < rootStyles.length; i++) {
+            const prop = rootStyles[i];
+            if (prop.startsWith("--")) {
+                cssVars += `  ${prop}: ${rootStyles.getPropertyValue(prop)};\n`;
+            }
+        }
+        cssVars += "}\n::-webkit-scrollbar { display: none; }";
+        this.cssVarsCache = cssVars;
+        return cssVars;
+    }
 
     async onload() {
         console.log("NoteMinimap Loaded");
@@ -470,6 +486,8 @@ class NoteMinimap extends Plugin {
 }
 
 class Minimap {
+    minimapScrollOffset = 0;
+
     constructor(plugin, element, settings, helperLeafId) {
         this.plugin = plugin;
         this.element = element;
@@ -545,8 +563,7 @@ class Minimap {
     }
 
     updateSettingsInCSS() {
-        if (this.iframe) this.iframe.style.setProperty("--scale", this.scale);
-        if (this.slider) this.slider.style.setProperty("--scale", this.scale);
+        if (this.container) this.container.style.setProperty("--scale", this.scale);
         if (this.slider) this.slider.style.opacity = this.sliderOpacity;
         if (this.iframe) this.iframe.style.top = `${this.topOffset}px`;
         this.updateReservedWidth();
@@ -559,12 +576,13 @@ class Minimap {
         this.container.removeEventListener("wheel", this.onMinimapWheel);
         document.removeEventListener("mousemove", this.onSliderMouseMove);
         document.removeEventListener("mouseup", this.onSliderMouseUp);
+        document.removeEventListener("mousemove", this.onMinimapDragMove);
+        document.removeEventListener("mouseup", this.onMinimapDragUp);
 
-        this.iframe.remove();
-        this.slider.remove();
-
+        this.container.remove();
         this.iframe = null;
         this.slider = null;
+        this.container = null;
         this.element.style.removeProperty("--cursor-minimap-reserved");
         // console.log("destroyed");
     }
@@ -619,17 +637,21 @@ class Minimap {
             )
             .forEach((e) => e.remove());
 
-        const container = document.createElement("div");
-        container.className = "minimap-container";
-        this.element.prepend(container);
+        this.container = document.createElement("div");
+        this.container.className = "minimap-container";
+        this.element.prepend(this.container);
 
         this.iframe = document.createElement("iframe");
         this.iframe.className = "minimap-frame";
-        container.appendChild(this.iframe);
+        this.container.appendChild(this.iframe);
+
+        this.overlay = document.createElement("div");
+        this.overlay.className = "minimap-click-overlay";
+        this.container.appendChild(this.overlay);
 
         this.slider = document.createElement("div");
         this.slider.className = "minimap-slider";
-        container.appendChild(this.slider);
+        this.container.appendChild(this.slider);
         this.onMinimapMouseDown = this.onMinimapMouseDown.bind(this);
         this.updateReservedWidth();
     }
@@ -655,20 +677,7 @@ class Minimap {
             ? "theme-dark"
             : "theme-light";
 
-        const rootStyles = getComputedStyle(
-            document.documentElement.querySelector("body")
-        );
-        let cssVars = ":root {\n";
-        for (let i = 0; i < rootStyles.length; i++) {
-            const prop = rootStyles[i];
-            if (prop.startsWith("--")) {
-                const value = rootStyles.getPropertyValue(prop);
-                cssVars += `  ${prop}: ${value};\n`;
-            }
-        }
-        cssVars += "}";
-        // Remove scrollbar inside minimap
-        cssVars += "::-webkit-scrollbar {display: none;}";
+        const cssVars = this.plugin.getCssVars();
 
         const html = `
 		<!DOCTYPE html>
@@ -714,16 +723,23 @@ class Minimap {
 
     updateSliderScroll() {
         if (!this.scroller) return;
+        const scrollTop = this.scroller.scrollTop;
+        if (scrollTop !== this._lastScrollTop) {
+            this.minimapScrollOffset = 0;
+            this._lastScrollTop = scrollTop;
+        }
         const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
         const containerHeight = Math.max(1, this.container?.getBoundingClientRect().height || this.scroller.clientHeight);
         const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
-        const scaledFullHeight = Math.max(containerHeight, (this.fullHeight || this.scroller.scrollHeight) * this.scale);
+        const scaledFullHeight = (this.fullHeight || this.scroller.scrollHeight) * this.scale;
+        const effectiveHeight = Math.min(containerHeight, Math.max(sliderHeight, scaledFullHeight));
         const frameMaxTop = Math.max(0, scaledFullHeight - containerHeight);
         const frameTop = -(this.scroller.scrollTop / maxScroll) * frameMaxTop + (this.topOffset || 0);
-        const maxTop = Math.max(0, containerHeight - sliderHeight);
+        const maxTop = Math.max(0, effectiveHeight - sliderHeight);
         const boxTop = Math.max(0, Math.min(maxTop, (this.scroller.scrollTop / maxScroll) * maxTop));
-        this.iframe.style.top = `${frameTop}px`;
-        this.slider.style.top = `${boxTop}px`;
+        const offset = this.minimapScrollOffset;
+        this.iframe.style.top = `${frameTop - offset}px`;
+        this.slider.style.top = `${boxTop - offset}px`;
     }
 
     // Needed since obsidian doesn't load non-visible parts of the note (can't be changed).
@@ -747,32 +763,53 @@ class Minimap {
         document.addEventListener("mouseup", this.onSliderMouseUp);
     }
 
+    minimapScrollToY(clientY) {
+        const maxScroll = this.scroller.scrollHeight - this.scroller.clientHeight;
+        const containerRect = this.container.getBoundingClientRect();
+        const containerHeight = containerRect.height;
+        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
+        const scaledFullHeight = (this.fullHeight || this.scroller.scrollHeight) * this.scale;
+        const effectiveHeight = Math.min(containerHeight, Math.max(sliderHeight, scaledFullHeight));
+        const maxTop = Math.max(1, effectiveHeight - sliderHeight);
+        const y = clientY - containerRect.top - sliderHeight / 2 + this.minimapScrollOffset;
+        this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, y / maxTop * maxScroll));
+        this.minimapScrollOffset = 0;
+        this.updateSliderScroll();
+    }
+
     onMinimapMouseDown(e) {
         if (e.button !== 0 || !this.scroller) return;
         if (e.target instanceof Element && e.target.closest(".minimap-slider")) return;
         e.preventDefault();
         e.stopPropagation();
-        const maxScroll = this.scroller.scrollHeight - this.scroller.clientHeight;
-        const containerRect = this.container.getBoundingClientRect();
-        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
-        const y = e.clientY - containerRect.top - sliderHeight / 2;
-        const maxTop = Math.max(1, containerRect.height - sliderHeight);
-        const targetScroll = y / maxTop * maxScroll;
-        this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, targetScroll));
-        this.updateSliderScroll();
+        this.minimapScrollToY(e.clientY);
+        this.isMinimapDragging = true;
+        document.addEventListener("mousemove", this.onMinimapDragMove);
+        document.addEventListener("mouseup", this.onMinimapDragUp);
     }
+
+    onMinimapDragMove = (e) => {
+        if (!this.isMinimapDragging) return;
+        this.minimapScrollToY(e.clientY);
+    };
+
+    onMinimapDragUp = () => {
+        this.isMinimapDragging = false;
+        document.removeEventListener("mousemove", this.onMinimapDragMove);
+        document.removeEventListener("mouseup", this.onMinimapDragUp);
+    };
 
     onMinimapWheel(e) {
         if (!this.scroller) return;
         e.preventDefault();
         e.stopPropagation();
-        const delta = e.deltaMode === 1
-            ? e.deltaY * 40
-            : e.deltaMode === 2
-                ? e.deltaY * this.scroller.clientHeight
-                : e.deltaY;
-        const maxScroll = Math.max(0, this.scroller.scrollHeight - this.scroller.clientHeight);
-        this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, this.scroller.scrollTop + delta));
+        const delta = e.deltaMode === 1 ? e.deltaY * 40
+                    : e.deltaMode === 2 ? e.deltaY * this.scroller.clientHeight
+                    : e.deltaY;
+        const containerHeight = this.container.getBoundingClientRect().height || this.scroller.clientHeight;
+        const scaledFullHeight = Math.max(containerHeight, (this.fullHeight || this.scroller.scrollHeight) * this.scale);
+        const maxOffset = Math.max(0, scaledFullHeight - containerHeight);
+        this.minimapScrollOffset = Math.max(-maxOffset, Math.min(maxOffset, this.minimapScrollOffset + delta));
         this.updateSliderScroll();
     }
 
@@ -788,7 +825,9 @@ class Minimap {
             this.scroller.scrollHeight - this.scroller.clientHeight;
         const containerHeight = Math.max(1, this.container.getBoundingClientRect().height);
         const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
-        const maxOffset = Math.max(1, containerHeight - sliderHeight);
+        const scaledFullHeight = (this.fullHeight || this.scroller.scrollHeight) * this.scale;
+        const effectiveHeight = Math.min(containerHeight, Math.max(sliderHeight, scaledFullHeight));
+        const maxOffset = Math.max(1, effectiveHeight - sliderHeight);
 
         offsetY = Math.max(0, Math.min(offsetY, maxOffset));
 

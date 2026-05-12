@@ -44,6 +44,17 @@
     overflow: hidden;
 }
 
+.minimap-click-overlay {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: calc(100% * var(--scale));
+    height: 100%;
+    z-index: 1;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
 .minimap-frame ::-webkit-scrollbar {
     display: none !important;
 }
