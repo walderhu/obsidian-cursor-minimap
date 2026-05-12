@@ -140,8 +140,9 @@ class MinimapController {
     const lastLine = this.safeLastLine();
     const lineCount = Math.max(1, lastLine + 1);
     const totalWeight = Math.max(1, this.lineWeights.reduce((sum, weight) => sum + weight, 0));
-    const weightHeight = height / totalWeight;
-    const averageRowHeight = height / lineCount;
+    const scaleHeight = Math.max(totalWeight, this.scroller?.scrollHeight || totalWeight);
+    const weightHeight = height / scaleHeight;
+    const averageRowHeight = Math.min(height, totalWeight * weightHeight) / lineCount;
     const minPaintHeight = lineCount > height * 1.5 ? 0.55 : Math.max(0.75, Math.min(2, averageRowHeight));
     const charWidth = lineCount > 1800 ? 1.05 : lineCount > 900 ? 1.25 : 1.55;
     const maxColumns = Math.max(30, Math.floor((width - 12) / charWidth));
@@ -333,7 +334,11 @@ class MinimapController {
     const contentHeight = Math.max(clientHeight, this.scroller.scrollHeight);
     const maxScroll = Math.max(1, contentHeight - clientHeight);
     const viewportHeight = Math.max(20, Math.min(height, clientHeight / contentHeight * height));
-    const top = Math.max(0, Math.min(height - viewportHeight, this.scroller.scrollTop / maxScroll * (height - viewportHeight)));
+    const correction = this.getViewportTopCorrection();
+    const scrollTop = this.scroller.scrollTop >= maxScroll - 1
+      ? maxScroll
+      : Math.max(0, this.scroller.scrollTop - correction);
+    const top = Math.max(0, Math.min(height - viewportHeight, scrollTop / maxScroll * (height - viewportHeight)));
     this.viewport.style.top = `${Math.min(height - viewportHeight, top)}px`;
     this.viewport.style.height = `${viewportHeight}px`;
   }
@@ -341,6 +346,10 @@ class MinimapController {
   getEstimatedContentHeight() {
     const weightedHeight = this.lineWeights.reduce((sum, weight) => sum + Math.max(0, weight || 0), 0);
     return Math.max(1, weightedHeight || this.scroller?.scrollHeight || 1);
+  }
+
+  getViewportTopCorrection() {
+    return this.getBaseLineHeight() * 5;
   }
 
   safeLastLine() {
