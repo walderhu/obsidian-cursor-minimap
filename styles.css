@@ -1,8 +1,10 @@
 .minimap-frame {
     position: absolute;
+    top: 0;
+    right: 0;
     width: 100%;
     pointer-events: none;
-    scale: var(--scale) var(--scale-y, var(--scale));
+    scale: var(--scale);
     transform-origin: top right;
     z-index: 1;
 }
@@ -33,9 +35,13 @@
 
 .minimap-container {
     position: absolute;
+    top: 0;
+    right: 0;
     height: 100%;
     width: 100%;
     pointer-events: none;
+    z-index: 30;
+    overflow: hidden;
 }
 
 .minimap-frame ::-webkit-scrollbar {
