@@ -1,6 +1,7 @@
 const { Plugin, MarkdownView, Notice } = require("obsidian");
 
 const VIEW_TYPE_MARKDOWN = "markdown";
+const TASK_KANBAN_FIXED_HEIGHT = 500;
 
 class MinimapController {
   constructor(plugin, view) {
@@ -16,6 +17,8 @@ class MinimapController {
     this.scroller = null;
     this.raf = 0;
     this.dragging = false;
+    this.observer = null;
+    this.resizeObserver = null;
     this.boundScroll = () => this.scheduleRefresh();
     this.boundPointerDown = (event) => this.onPointerDown(event);
     this.boundPointerMove = (event) => this.onPointerMove(event);
@@ -40,6 +43,20 @@ class MinimapController {
     window.addEventListener("pointerup", this.boundPointerUp, true);
     window.addEventListener("wheel", this.boundWheel, { capture: true, passive: false });
     this.root.addEventListener("wheel", this.boundWheel, { capture: true, passive: false });
+    this.observer = new MutationObserver((mutations) => {
+      if (mutations.every((mutation) => this.root?.contains(mutation.target))) return;
+      this.scheduleRefresh();
+    });
+    this.observer.observe(content, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "data-callout-fold"]
+    });
+    this.resizeObserver = new ResizeObserver(() => this.scheduleRefresh());
+    this.resizeObserver.observe(content);
+    this.resizeObserver.observe(this.scroller);
     this.scheduleRefresh();
   }
 
@@ -52,12 +69,16 @@ class MinimapController {
     window.removeEventListener("pointermove", this.boundPointerMove, true);
     window.removeEventListener("pointerup", this.boundPointerUp, true);
     window.removeEventListener("wheel", this.boundWheel, true);
+    this.observer?.disconnect();
+    this.resizeObserver?.disconnect();
     this.root?.remove();
     this.root = null;
     this.canvas = null;
     this.ctx = null;
     this.viewport = null;
     this.scroller = null;
+    this.observer = null;
+    this.resizeObserver = null;
   }
 
   getScroller() {
@@ -73,8 +94,10 @@ class MinimapController {
   setScroller(scroller) {
     if (this.scroller === scroller) return;
     this.scroller?.removeEventListener("scroll", this.boundScroll);
+    if (this.resizeObserver && this.scroller) this.resizeObserver.unobserve(this.scroller);
     this.scroller = scroller;
     this.scroller?.addEventListener("scroll", this.boundScroll, { passive: true });
+    if (this.resizeObserver && this.scroller) this.resizeObserver.observe(this.scroller);
   }
 
   scheduleRefresh() {
@@ -367,27 +390,47 @@ class MinimapController {
     const weights = [];
     let insideKanban = false;
     let kanbanCollapsed = false;
+    let kanbanLines = [];
     for (const line of lines) {
       const text = String(line || "");
       if (text.includes("<!-- task-kanban:start -->")) {
         insideKanban = true;
         kanbanCollapsed = this.isTaskKanbanCollapsed();
-        weights.push(baseLineHeight * 0.2);
+        kanbanLines = [text];
         continue;
       }
       if (text.includes("<!-- task-kanban:end -->")) {
+        kanbanLines.push(text);
+        weights.push(...this.measureKanbanBlockWeights(kanbanLines, baseLineHeight, kanbanCollapsed));
         insideKanban = false;
         kanbanCollapsed = false;
-        weights.push(baseLineHeight * 0.2);
+        kanbanLines = [];
         continue;
       }
       if (insideKanban) {
-        weights.push(this.measureKanbanLineWeight(text, baseLineHeight, kanbanCollapsed));
+        kanbanLines.push(text);
         continue;
       }
       weights.push(this.measureLineWeight(text, baseLineHeight));
     }
+    if (insideKanban && kanbanLines.length) {
+      weights.push(...this.measureKanbanBlockWeights(kanbanLines, baseLineHeight, kanbanCollapsed));
+    }
     return weights;
+  }
+
+  measureKanbanBlockWeights(lines, baseLineHeight, collapsed) {
+    const total = collapsed ? baseLineHeight * 2.1 : TASK_KANBAN_FIXED_HEIGHT;
+    const weights = lines.map((line) => {
+      const text = String(line || "");
+      if (text.includes("<!-- task-kanban:start -->") || text.includes("<!-- task-kanban:end -->")) return 0.05;
+      if (/\[!(?:todo|task-kanban)\]\+?\s+Task Kanban/.test(text)) return 1.2;
+      if (/task-kanban-inline-marker|task-kanban-inline-card/.test(text)) return collapsed ? 0.05 : 8;
+      if (/^\s*>\s*$/.test(text)) return 0.1;
+      return collapsed ? 0.05 : 0.4;
+    });
+    const sum = Math.max(0.1, weights.reduce((acc, weight) => acc + weight, 0));
+    return weights.map((weight) => total * weight / sum);
   }
 
   measureLineWeight(line, baseLineHeight) {
@@ -400,11 +443,7 @@ class MinimapController {
       const level = text.match(/^\s{0,3}(#{1,6})\s+/)?.[1].length || 6;
       return baseLineHeight * (level <= 1 ? 2.1 : level === 2 ? 1.75 : 1.35);
     }
-    const plainLength = text.replace(/\s+/g, " ").trim().length;
-    const contentWidth = this.getContentWidth();
-    const charsPerLine = Math.max(18, Math.floor(contentWidth / this.getAverageCharWidth()));
-    const visualLines = Math.max(1, Math.ceil(plainLength / charsPerLine));
-    return baseLineHeight * Math.min(8, visualLines);
+    return this.measureWrappedTextWeight(text, baseLineHeight, 8);
   }
 
   measureKanbanLineWeight(line, baseLineHeight, collapsed) {
@@ -414,18 +453,21 @@ class MinimapController {
       return baseLineHeight * 0.05;
     }
     if (/task-kanban-inline-marker|task-kanban-inline-card/.test(text)) {
-      const cards = Math.max(1, (text.match(/task-kanban-inline-card/g) || []).length);
-      const columns = Math.max(1, (text.match(/task-kanban-inline-marker/g) || []).length);
-      const rows = Math.ceil(cards / Math.max(1, columns));
-      const subtasks = (text.match(/task-kanban-inline-subtask/g) || []).length;
-      const visibleColumns = Math.min(3, columns);
-      const columnRows = Math.ceil(cards / Math.max(1, visibleColumns));
-      return baseLineHeight * (3.9 + columnRows * 2.25 + Math.min(12, subtasks) * 0.42);
+      return TASK_KANBAN_FIXED_HEIGHT;
     }
     if (/\[!(?:todo|task-kanban)\]\+?\s+Task Kanban/.test(text)) return baseLineHeight * 1.8;
     if (/task-kanban-inline-action/.test(text)) return baseLineHeight * 1.6;
     if (/^\s*>\s*$/.test(text)) return baseLineHeight * 0.25;
     return baseLineHeight * 0.9;
+  }
+
+  measureWrappedTextWeight(text, baseLineHeight, maxVisualLines = 8) {
+    const plainLength = String(text || "").replace(/\s+/g, " ").trim().length;
+    if (!plainLength) return baseLineHeight * 0.82;
+    const contentWidth = this.getContentWidth();
+    const charsPerLine = Math.max(18, Math.floor(contentWidth / this.getAverageCharWidth()));
+    const visualLines = Math.max(1, Math.ceil(plainLength / charsPerLine));
+    return baseLineHeight * Math.min(maxVisualLines, visualLines);
   }
 
   isTaskKanbanCollapsed() {
