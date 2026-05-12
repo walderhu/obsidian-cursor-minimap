@@ -349,7 +349,7 @@ class MinimapController {
   }
 
   getViewportTopCorrection() {
-    return this.getBaseLineHeight() * 5;
+    return this.getBaseLineHeight() * 10;
   }
 
   safeLastLine() {
