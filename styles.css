@@ -1,80 +1,61 @@
-.cursor-minimap-host {
-  position: relative;
-  --cursor-minimap-width: 116px;
-  --cursor-minimap-gap: 10px;
-  --cursor-minimap-reserved: calc(var(--cursor-minimap-width) + var(--cursor-minimap-gap));
+.minimap-frame {
+    position: absolute;
+    width: 100%;
+    pointer-events: none;
+    scale: var(--scale) var(--scale-y, var(--scale));
+    transform-origin: top right;
+    z-index: 1;
 }
 
-.cursor-minimap-host .cm-scroller {
-  padding-right: var(--cursor-minimap-reserved) !important;
-  box-sizing: border-box;
+.minimap-slider {
+    right: 0;
+    position: absolute;
+    width: calc(100% * var(--scale));
+    background-color: color-mix(in srgb, var(--interactive-accent) 32%, transparent);
+    border: 1px solid color-mix(in srgb, var(--interactive-accent) 82%, var(--text-normal));
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--background-primary) 48%, transparent),
+        0 0 0 1px color-mix(in srgb, var(--background-primary) 60%, transparent);
+    box-sizing: border-box;
+    z-index: 2;
+    pointer-events: auto;
 }
 
-.cursor-minimap-host .cm-content {
-  padding-right: var(--cursor-minimap-gap) !important;
+.minimap-slider:hover,
+.minimap-slider.dragging {
+    background-color: color-mix(in srgb, var(--interactive-accent) 42%, transparent);
+    border-color: color-mix(in srgb, var(--interactive-accent) 92%, var(--text-normal));
 }
 
-.cursor-minimap-host .markdown-preview-view {
-  padding-right: var(--cursor-minimap-reserved) !important;
-  box-sizing: border-box;
+.minimap-slider.dragging {
+    opacity: 0.5 !important;
 }
 
-.cursor-minimap-host .markdown-preview-sizer {
-  padding-right: var(--cursor-minimap-gap) !important;
-  box-sizing: border-box;
+.minimap-container {
+    position: absolute;
+    height: 100%;
+    width: 100%;
+    pointer-events: none;
 }
 
-.cursor-minimap {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: auto;
-  height: 100%;
-  width: var(--cursor-minimap-width);
-  z-index: 20;
-  background: color-mix(in srgb, var(--background-primary) 38%, transparent);
-  cursor: pointer;
-  opacity: 0.72;
-  pointer-events: auto;
-  touch-action: none;
-  overscroll-behavior: contain;
-  transition: opacity 120ms ease;
-  overflow: hidden;
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--background-modifier-border) 34%, transparent);
+.minimap-frame ::-webkit-scrollbar {
+    display: none !important;
 }
 
-.cursor-minimap:hover {
-  opacity: 0.96;
+.view-content:has(.minimap-container:not([style*="display: none"])) .cm-scroller,
+.view-content:has(.minimap-container:not([style*="display: none"])) .markdown-preview-view {
+    padding-right: var(--cursor-minimap-reserved, 132px) !important;
+    box-sizing: border-box;
 }
 
-.cursor-minimap-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+.view-content:has(.minimap-container:not([style*="display: none"])) .cm-content,
+.view-content:has(.minimap-container:not([style*="display: none"])) .markdown-preview-sizer {
+    padding-right: 12px !important;
+    box-sizing: border-box;
 }
 
-.cursor-minimap-viewport {
-  position: absolute;
-  left: 0;
-  right: 0;
-  border: 1px solid color-mix(in srgb, var(--interactive-accent) 72%, var(--text-normal));
-  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
-  box-sizing: border-box;
-  pointer-events: none;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--background-primary) 42%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--background-primary) 60%, transparent);
-}
-
-.cursor-minimap:hover .cursor-minimap-viewport,
-.cursor-minimap.is-dragging .cursor-minimap-viewport,
-.cursor-minimap-viewport.active {
-  background: color-mix(in srgb, var(--interactive-accent) 24%, transparent);
-  border-color: color-mix(in srgb, var(--interactive-accent) 88%, var(--text-normal));
-}
-
-.is-mobile .cursor-minimap,
-.cursor-minimap-host:not(:has(.cm-scroller)):not(:has(.markdown-preview-view)) .cursor-minimap {
-  display: none;
+.minimap-disabled .minimap-container,
+.minimap-disabled .minimap-frame,
+.minimap-disabled .minimap-slider {
+    display: none !important;
 }
