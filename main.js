@@ -835,21 +835,21 @@ module.exports = {
 },
 "js/minimap-scroll": function(require, module, exports) {
 module.exports = {
-    isPointerInsideMinimapDragZone(event) {
-        if (!this.container) return false;
+    getMinimapDragZoneRect() {
+        const rect = this.iframe?.getBoundingClientRect();
+        if (rect?.width && rect?.height) return rect;
+        return this.container?.getBoundingClientRect();
+    },
 
-        const containerRect = this.container.getBoundingClientRect();
-        const minimapWidth = Math.max(
-            1,
-            containerRect.width * (this.scale || 1)
-        );
-        const left = containerRect.right - minimapWidth;
+    isPointerInsideMinimapDragZone(event) {
+        const rect = this.getMinimapDragZoneRect();
+        if (!rect) return false;
 
         return (
-            event.clientX >= left &&
-            event.clientX <= containerRect.right &&
-            event.clientY >= containerRect.top &&
-            event.clientY <= containerRect.bottom
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom
         );
     },
 
@@ -861,26 +861,19 @@ module.exports = {
             this._lastScrollTop = scrollTop;
         }
 
+        const yScale = this.yScale || this.scale || 1;
         const maxScroll = Math.max(
-            1,
+            0,
             this.scroller.scrollHeight - this.scroller.clientHeight
         );
-        const containerHeight = Math.max(
-            1,
-            this.container?.getBoundingClientRect().height ||
-                this.scroller.clientHeight
-        );
-        const sliderHeight = Math.max(
-            12,
-            this.slider.getBoundingClientRect().height ||
-                this.scroller.clientHeight * (this.yScale || this.scale)
-        );
-        const maxTop = Math.max(0, containerHeight - sliderHeight);
+        const sliderHeight = Math.max(1, this.scroller.clientHeight * yScale);
+        const maxTop = (this.topOffset || 0) + maxScroll * yScale;
         const boxTop = Math.max(
-            0,
-            Math.min(maxTop, (this.scroller.scrollTop / maxScroll) * maxTop)
+            this.topOffset || 0,
+            Math.min(maxTop, (this.topOffset || 0) + scrollTop * yScale)
         );
         this.iframe.style.top = `${this.topOffset || 0}px`;
+        this.slider.style.height = `${sliderHeight}px`;
         this.slider.style.top = `${boxTop}px`;
     },
 
@@ -897,19 +890,16 @@ module.exports = {
     },
 
     minimapScrollToY(clientY) {
-        const maxScroll = this.scroller.scrollHeight - this.scroller.clientHeight;
-        const containerRect = this.container.getBoundingClientRect();
-        const containerHeight = containerRect.height;
-        const sliderHeight = Math.max(
-            12,
-            this.slider.getBoundingClientRect().height ||
-                this.scroller.clientHeight * (this.yScale || this.scale)
+        const yScale = this.yScale || this.scale || 1;
+        const maxScroll = Math.max(
+            0,
+            this.scroller.scrollHeight - this.scroller.clientHeight
         );
-        const maxTop = Math.max(1, containerHeight - sliderHeight);
-        const y = clientY - containerRect.top - sliderHeight / 2;
+        const rect = this.getMinimapDragZoneRect();
+        const y = clientY - rect.top - this.scroller.clientHeight * yScale / 2;
         this.scroller.scrollTop = Math.max(
             0,
-            Math.min(maxScroll, (y / maxTop) * maxScroll)
+            Math.min(maxScroll, y / yScale)
         );
         this.minimapScrollOffset = 0;
         this.updateSliderScroll();
@@ -923,6 +913,7 @@ module.exports = {
         ) {
             return;
         }
+        if (!this.isPointerInsideMinimapDragZone(event)) return;
         event.preventDefault();
         event.stopPropagation();
         this.minimapScrollToY(event.clientY);
@@ -933,7 +924,10 @@ module.exports = {
 
     onMinimapDragMove(event) {
         if (!this.isMinimapDragging) return;
-        if (!this.isPointerInsideMinimapDragZone(event)) return;
+        if (!this.isPointerInsideMinimapDragZone(event)) {
+            this.onMinimapDragUp();
+            return;
+        }
         this.minimapScrollToY(event.clientY);
     },
 
@@ -960,27 +954,27 @@ module.exports = {
 
     onSliderMouseMove(event) {
         if (!this.isDragging) return;
-        if (!this.isPointerInsideMinimapDragZone(event)) return;
+        if (!this.isPointerInsideMinimapDragZone(event)) {
+            this.onSliderMouseUp();
+            return;
+        }
 
-        const editorRect = this.element.getBoundingClientRect();
+        const yScale = this.yScale || this.scale || 1;
+        const containerRect = this.container.getBoundingClientRect();
         let offsetY =
-            event.clientY - editorRect.top - this.dragOffsetY - this.topOffset;
+            event.clientY -
+            containerRect.top -
+            this.dragOffsetY -
+            (this.topOffset || 0);
 
-        const maxScroll =
-            this.scroller.scrollHeight - this.scroller.clientHeight;
-        const containerHeight = Math.max(
-            1,
-            this.container.getBoundingClientRect().height
+        const maxScroll = Math.max(
+            0,
+            this.scroller.scrollHeight - this.scroller.clientHeight
         );
-        const sliderHeight = Math.max(
-            12,
-            this.slider.getBoundingClientRect().height ||
-                this.scroller.clientHeight * (this.yScale || this.scale)
-        );
-        const maxOffset = Math.max(1, containerHeight - sliderHeight);
+        const maxOffset = maxScroll * yScale;
 
         offsetY = Math.max(0, Math.min(offsetY, maxOffset));
-        this.scroller.scrollTop = (offsetY / maxOffset) * maxScroll;
+        this.scroller.scrollTop = yScale ? offsetY / yScale : 0;
 
         this.updateSliderScroll();
     },
