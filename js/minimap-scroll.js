@@ -21,7 +21,7 @@ module.exports = {
         const yScale = this.yScale || this.scale || 1;
         const exactHeight = this.scroller.clientHeight * yScale;
         const zoneWidth = this.getMinimapDragZoneRect()?.width || 0;
-        const minHeight = this.yScale < this.scale ? zoneWidth : 1;
+        const minHeight = this.yScale < this.scale ? zoneWidth / 2 : 1;
         return Math.max(minHeight, exactHeight, 1);
     },
 
