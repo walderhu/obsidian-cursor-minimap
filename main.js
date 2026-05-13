@@ -258,8 +258,20 @@ module.exports = {
             return;
         }
 
+        const existing = this.minimapInstances.get(element);
+        const isReadMode =
+            element.querySelector(".markdown-source-view")?.clientHeight === 0;
+
+        if (!isReadMode) {
+            if (existing) {
+                existing.destroy();
+                this.minimapInstances.delete(element);
+                this.resizeObserver.unobserve(element);
+            }
+            return;
+        }
+
         if (element.classList.contains("minimap-disabled")) {
-            const existing = this.minimapInstances.get(element);
             if (existing) {
                 existing.destroy();
                 this.minimapInstances.delete(element);
@@ -617,13 +629,18 @@ module.exports = {
     },
 
     modeChange() {
+        if (!this.isReadModeActive()) {
+            this.plugin.updateElementMinimap(this.element);
+            return;
+        }
+
         this.changeScroller(
             this.element.querySelector(
-                this.isReadModeActive()
-                    ? ".markdown-preview-view"
-                    : ".cm-scroller"
+                ".markdown-preview-view"
             )
         );
+        this.lastIframeHTML = "";
+        this.updateIframe();
     },
 
     changeScroller(newScroller) {
@@ -835,15 +852,8 @@ module.exports = {
     },
 
     async getFullHTML() {
-        if (this.isReadModeActive()) {
-            return await renderReadMode(this.plugin, this.element);
-        }
-        return await renderEditMode(
-            this.plugin,
-            this.element,
-            this.helperElement,
-            this.scroller
-        );
+        if (!this.isReadModeActive()) return null;
+        return await renderReadMode(this.plugin, this.element);
     },
 };
 

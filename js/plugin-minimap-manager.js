@@ -34,8 +34,20 @@ module.exports = {
             return;
         }
 
+        const existing = this.minimapInstances.get(element);
+        const isReadMode =
+            element.querySelector(".markdown-source-view")?.clientHeight === 0;
+
+        if (!isReadMode) {
+            if (existing) {
+                existing.destroy();
+                this.minimapInstances.delete(element);
+                this.resizeObserver.unobserve(element);
+            }
+            return;
+        }
+
         if (element.classList.contains("minimap-disabled")) {
-            const existing = this.minimapInstances.get(element);
             if (existing) {
                 existing.destroy();
                 this.minimapInstances.delete(element);

@@ -124,14 +124,7 @@ module.exports = {
     },
 
     async getFullHTML() {
-        if (this.isReadModeActive()) {
-            return await renderReadMode(this.plugin, this.element);
-        }
-        return await renderEditMode(
-            this.plugin,
-            this.element,
-            this.helperElement,
-            this.scroller
-        );
+        if (!this.isReadModeActive()) return null;
+        return await renderReadMode(this.plugin, this.element);
     },
 };

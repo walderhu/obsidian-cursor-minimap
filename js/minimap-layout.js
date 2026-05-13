@@ -6,13 +6,18 @@ module.exports = {
     },
 
     modeChange() {
+        if (!this.isReadModeActive()) {
+            this.plugin.updateElementMinimap(this.element);
+            return;
+        }
+
         this.changeScroller(
             this.element.querySelector(
-                this.isReadModeActive()
-                    ? ".markdown-preview-view"
-                    : ".cm-scroller"
+                ".markdown-preview-view"
             )
         );
+        this.lastIframeHTML = "";
+        this.updateIframe();
     },
 
     changeScroller(newScroller) {
