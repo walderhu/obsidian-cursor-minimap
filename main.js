@@ -9,8 +9,6 @@ const {
     Notice,
 } = require("obsidian");
 
-const MINIMAP_BOTTOM_OVERSCROLL_RATIO = 0.5;
-
 class MinimapSettingTab extends PluginSettingTab {
     constructor(plugin) {
         super(plugin.app, plugin);
@@ -566,6 +564,8 @@ class Minimap {
 
     updateSettingsInCSS() {
         if (this.container) this.container.style.setProperty("--scale", this.scale);
+        if (this.container)
+            this.container.style.setProperty("--y-scale", this.yScale || this.scale);
         if (this.slider) this.slider.style.opacity = this.sliderOpacity;
         if (this.iframe) this.iframe.style.top = `${this.topOffset}px`;
         this.updateReservedWidth();
@@ -621,23 +621,27 @@ class Minimap {
         await sleep(300);
 
         const visibleHeight = this.scroller.getBoundingClientRect().height;
-        this.bottomOverscrollHeight = Math.round(
-            visibleHeight * MINIMAP_BOTTOM_OVERSCROLL_RATIO
-        );
         const sizerHeight =
             this.scroller.firstChild?.getBoundingClientRect().height || 0;
         const scrollHeight = this.scroller.scrollHeight || 0;
+        this.bottomOverscrollHeight = Math.max(0, scrollHeight - sizerHeight);
 
-        this.resize(
-            Math.max(sizerHeight + this.bottomOverscrollHeight, scrollHeight),
-            visibleHeight
-        );
+        if (!this.hasMeasuredIframeHeight)
+            this.documentHeight = sizerHeight || scrollHeight;
+        const fullHeight = this.hasMeasuredIframeHeight
+            ? this.documentHeight
+            : this.documentHeight + this.bottomOverscrollHeight;
+        this.resize(fullHeight, visibleHeight);
     }
     resize(fullHeight, visibleHeight) {
         this.fullHeight = Math.max(1, fullHeight || 1);
         this.visibleHeight = Math.max(1, visibleHeight || 1);
+        const availableHeight = Math.max(1, this.visibleHeight - (this.topOffset || 0));
+        this.yScale = Math.min(1, availableHeight / this.fullHeight);
+        if (this.container)
+            this.container.style.setProperty("--y-scale", this.yScale);
         this.iframe.style.height = `${fullHeight}px`;
-        this.slider.style.height = `${visibleHeight * this.scale}px`;
+        this.slider.style.height = `${this.visibleHeight * this.yScale}px`;
         this.updateSliderScroll();
     }
 
@@ -691,10 +695,14 @@ class Minimap {
             : "theme-light";
 
         const cssVars = this.plugin.getCssVars();
+        const sizerHeight =
+            this.scroller?.firstChild?.getBoundingClientRect().height || 0;
+        const scrollHeight = this.scroller?.scrollHeight || 0;
         const bottomOverscrollHeight = Math.max(
             0,
-            Math.round(this.bottomOverscrollHeight || 0)
+            this.bottomOverscrollHeight || scrollHeight - sizerHeight
         );
+        this.bottomOverscrollHeight = bottomOverscrollHeight;
 
         const html = `
 		<!DOCTYPE html>
@@ -705,15 +713,23 @@ class Minimap {
             background: #161616;
             flex: 0 0 auto;
         }
+        .markdown-reading-view,
+        .markdown-preview-view,
+        .markdown-preview-sizer,
+        .markdown-preview-section {
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }
         </style></head>
-		<body style="background-color:${this.backgroundColor}" class="${themeClass} ${
-            this.isReadModeActive() ? "" : "markdown-preview-view"
-        } show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
+		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
 		</html>
 	`;
 
         if (this.iframe && html !== this.lastIframeHTML) {
             this.lastIframeHTML = html;
+            this.hasMeasuredIframeHeight = false;
             this.iframe.srcdoc = html;
         }
     }
@@ -721,12 +737,22 @@ class Minimap {
     onIframeLoad() {
         const body = this.iframe?.contentDocument?.body;
         if (!body || !this.visibleHeight) return;
+        const sizer = body.querySelector(".markdown-preview-sizer");
+        const contentElement = sizer || body;
+        const contentRect = contentElement.getBoundingClientRect();
+        const overscroll = body.querySelector(".cursor-minimap-bottom-overscroll");
+        const overscrollHeight = overscroll?.getBoundingClientRect().height || 0;
         const iframeContentHeight = Math.max(
-            body.scrollHeight || 0,
-            body.getBoundingClientRect?.().height || 0
-        );
-        if (iframeContentHeight > (this.fullHeight || 0) + 2) {
-            this.resize(iframeContentHeight, this.visibleHeight);
+            contentElement.scrollHeight || 0,
+            contentRect.height || 0
+        ) + overscrollHeight;
+        const measuredFullHeight = iframeContentHeight;
+        if (Math.abs(measuredFullHeight - (this.fullHeight || 0)) > 2) {
+            this.documentHeight = measuredFullHeight;
+            this.hasMeasuredIframeHeight = true;
+            this.resize(measuredFullHeight, this.visibleHeight);
+        } else {
+            this.hasMeasuredIframeHeight = true;
         }
     }
 
@@ -765,16 +791,11 @@ class Minimap {
         }
         const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
         const containerHeight = Math.max(1, this.container?.getBoundingClientRect().height || this.scroller.clientHeight);
-        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
-        const scaledFullHeight = (this.fullHeight || this.scroller.scrollHeight) * this.scale;
-        const effectiveHeight = Math.min(containerHeight, Math.max(sliderHeight, scaledFullHeight));
-        const frameMaxTop = Math.max(0, scaledFullHeight - containerHeight);
-        const frameTop = -(this.scroller.scrollTop / maxScroll) * frameMaxTop + (this.topOffset || 0);
-        const maxTop = Math.max(0, effectiveHeight - sliderHeight);
+        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * (this.yScale || this.scale));
+        const maxTop = Math.max(0, containerHeight - sliderHeight);
         const boxTop = Math.max(0, Math.min(maxTop, (this.scroller.scrollTop / maxScroll) * maxTop));
-        const offset = this.minimapScrollOffset;
-        this.iframe.style.top = `${frameTop - offset}px`;
-        this.slider.style.top = `${boxTop - offset}px`;
+        this.iframe.style.top = `${this.topOffset || 0}px`;
+        this.slider.style.top = `${boxTop}px`;
     }
 
     // Needed since obsidian doesn't load non-visible parts of the note (can't be changed).
@@ -802,11 +823,9 @@ class Minimap {
         const maxScroll = this.scroller.scrollHeight - this.scroller.clientHeight;
         const containerRect = this.container.getBoundingClientRect();
         const containerHeight = containerRect.height;
-        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
-        const scaledFullHeight = (this.fullHeight || this.scroller.scrollHeight) * this.scale;
-        const effectiveHeight = Math.min(containerHeight, Math.max(sliderHeight, scaledFullHeight));
-        const maxTop = Math.max(1, effectiveHeight - sliderHeight);
-        const y = clientY - containerRect.top - sliderHeight / 2 + this.minimapScrollOffset;
+        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * (this.yScale || this.scale));
+        const maxTop = Math.max(1, containerHeight - sliderHeight);
+        const y = clientY - containerRect.top - sliderHeight / 2;
         this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, y / maxTop * maxScroll));
         this.minimapScrollOffset = 0;
         this.updateSliderScroll();
@@ -839,12 +858,10 @@ class Minimap {
         e.preventDefault();
         e.stopPropagation();
         const delta = e.deltaMode === 1 ? e.deltaY * 40
-                    : e.deltaMode === 2 ? e.deltaY * this.scroller.clientHeight
-                    : e.deltaY;
-        const containerHeight = this.container.getBoundingClientRect().height || this.scroller.clientHeight;
-        const scaledFullHeight = Math.max(containerHeight, (this.fullHeight || this.scroller.scrollHeight) * this.scale);
-        const maxOffset = Math.max(0, scaledFullHeight - containerHeight);
-        this.minimapScrollOffset = Math.max(-maxOffset, Math.min(maxOffset, this.minimapScrollOffset + delta));
+            : e.deltaMode === 2 ? e.deltaY * this.scroller.clientHeight
+                : e.deltaY;
+        this.scroller.scrollTop += delta;
+        this.minimapScrollOffset = 0;
         this.updateSliderScroll();
     }
 
@@ -859,10 +876,8 @@ class Minimap {
         const maxScroll =
             this.scroller.scrollHeight - this.scroller.clientHeight;
         const containerHeight = Math.max(1, this.container.getBoundingClientRect().height);
-        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * this.scale);
-        const scaledFullHeight = (this.fullHeight || this.scroller.scrollHeight) * this.scale;
-        const effectiveHeight = Math.min(containerHeight, Math.max(sliderHeight, scaledFullHeight));
-        const maxOffset = Math.max(1, effectiveHeight - sliderHeight);
+        const sliderHeight = Math.max(12, this.slider.getBoundingClientRect().height || this.scroller.clientHeight * (this.yScale || this.scale));
+        const maxOffset = Math.max(1, containerHeight - sliderHeight);
 
         offsetY = Math.max(0, Math.min(offsetY, maxOffset));
 
