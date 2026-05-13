@@ -83,7 +83,7 @@ module.exports = {
         this.debouncedUpdateMinimap = debounce(
             () => this.updateElementMinimap(),
             700,
-            true
+            false
         );
         this.registerEvent(
             this.app.workspace.on("editor-change", this.debouncedUpdateMinimap)
@@ -713,29 +713,37 @@ const { renderEditMode, renderReadMode } = require("./renderers");
 
 module.exports = {
     async updateIframe(noteContent) {
-        if (!noteContent) noteContent = await this.getFullHTML();
-        if (!noteContent) return;
+        if (this.isUpdatingIframe) {
+            this.needsIframeUpdate = true;
+            return;
+        }
 
-        noteContent
-            .querySelectorAll(".minimap-frame, .minimap-slider")
-            .forEach((el) => el.remove());
-        this.syncTaskKanbanCollapse(noteContent);
+        this.isUpdatingIframe = true;
 
-        const stylesHTML = this.plugin.getStylesHTML();
-        const themeClass = document.body.classList.contains("theme-dark")
-            ? "theme-dark"
-            : "theme-light";
-        const cssVars = this.plugin.getCssVars();
-        const sizerHeight =
-            this.scroller?.firstChild?.getBoundingClientRect().height || 0;
-        const scrollHeight = this.scroller?.scrollHeight || 0;
-        const bottomOverscrollHeight = Math.max(
-            0,
-            this.bottomOverscrollHeight || scrollHeight - sizerHeight
-        );
-        this.bottomOverscrollHeight = bottomOverscrollHeight;
+        try {
+            if (!noteContent) noteContent = await this.getFullHTML();
+            if (!noteContent) return;
 
-        const html = `
+            noteContent
+                .querySelectorAll(".minimap-frame, .minimap-slider")
+                .forEach((el) => el.remove());
+            this.syncTaskKanbanCollapse(noteContent);
+
+            const stylesHTML = this.plugin.getStylesHTML();
+            const themeClass = document.body.classList.contains("theme-dark")
+                ? "theme-dark"
+                : "theme-light";
+            const cssVars = this.plugin.getCssVars();
+            const sizerHeight =
+                this.scroller?.firstChild?.getBoundingClientRect().height || 0;
+            const scrollHeight = this.scroller?.scrollHeight || 0;
+            const bottomOverscrollHeight = Math.max(
+                0,
+                this.bottomOverscrollHeight || scrollHeight - sizerHeight
+            );
+            this.bottomOverscrollHeight = bottomOverscrollHeight;
+
+            const html = `
 		<!DOCTYPE html>
 		<html>
 		<head>${stylesHTML}<style>${cssVars}
@@ -758,10 +766,17 @@ module.exports = {
 		</html>
 	`;
 
-        if (this.iframe && html !== this.lastIframeHTML) {
-            this.lastIframeHTML = html;
-            this.hasMeasuredIframeHeight = false;
-            this.iframe.srcdoc = html;
+            if (this.iframe && html !== this.lastIframeHTML) {
+                this.lastIframeHTML = html;
+                this.hasMeasuredIframeHeight = false;
+                this.iframe.srcdoc = html;
+            }
+        } finally {
+            this.isUpdatingIframe = false;
+            if (this.needsIframeUpdate) {
+                this.needsIframeUpdate = false;
+                window.setTimeout(() => this.updateIframe(), 0);
+            }
         }
     },
 
@@ -853,6 +868,13 @@ module.exports = {
         );
     },
 
+    isPointerInsideMinimapDragColumn(event) {
+        const rect = this.getMinimapDragZoneRect();
+        if (!rect) return false;
+
+        return event.clientX >= rect.left && event.clientX <= rect.right;
+    },
+
     getSliderVisualHeight() {
         const yScale = this.yScale || this.scale || 1;
         const exactHeight = this.scroller.clientHeight * yScale;
@@ -870,7 +892,7 @@ module.exports = {
             this.scroller.scrollHeight - this.scroller.clientHeight
         );
         const topBase = zoneRect.top - containerRect.top;
-        const travelHeight = Math.max(0, zoneRect.height - sliderHeight);
+        const travelHeight = Math.max(0, zoneRect.height - sliderHeight / 2);
 
         return {
             maxScroll,
@@ -972,7 +994,7 @@ module.exports = {
 
     onSliderMouseMove(event) {
         if (!this.isDragging) return;
-        if (!this.isPointerInsideMinimapDragZone(event)) {
+        if (!this.isPointerInsideMinimapDragColumn(event)) {
             this.onSliderMouseUp();
             return;
         }

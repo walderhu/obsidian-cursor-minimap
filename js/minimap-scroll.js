@@ -17,6 +17,13 @@ module.exports = {
         );
     },
 
+    isPointerInsideMinimapDragColumn(event) {
+        const rect = this.getMinimapDragZoneRect();
+        if (!rect) return false;
+
+        return event.clientX >= rect.left && event.clientX <= rect.right;
+    },
+
     getSliderVisualHeight() {
         const yScale = this.yScale || this.scale || 1;
         const exactHeight = this.scroller.clientHeight * yScale;
@@ -34,7 +41,7 @@ module.exports = {
             this.scroller.scrollHeight - this.scroller.clientHeight
         );
         const topBase = zoneRect.top - containerRect.top;
-        const travelHeight = Math.max(0, zoneRect.height - sliderHeight);
+        const travelHeight = Math.max(0, zoneRect.height - sliderHeight / 2);
 
         return {
             maxScroll,
@@ -136,7 +143,7 @@ module.exports = {
 
     onSliderMouseMove(event) {
         if (!this.isDragging) return;
-        if (!this.isPointerInsideMinimapDragZone(event)) {
+        if (!this.isPointerInsideMinimapDragColumn(event)) {
             this.onSliderMouseUp();
             return;
         }

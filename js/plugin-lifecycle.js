@@ -51,7 +51,7 @@ module.exports = {
         this.debouncedUpdateMinimap = debounce(
             () => this.updateElementMinimap(),
             700,
-            true
+            false
         );
         this.registerEvent(
             this.app.workspace.on("editor-change", this.debouncedUpdateMinimap)
