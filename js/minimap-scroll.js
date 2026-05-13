@@ -17,6 +17,14 @@ module.exports = {
         );
     },
 
+    getSliderVisualHeight() {
+        const yScale = this.yScale || this.scale || 1;
+        const exactHeight = this.scroller.clientHeight * yScale;
+        const zoneWidth = this.getMinimapDragZoneRect()?.width || 0;
+        const minHeight = this.yScale < this.scale ? zoneWidth : 1;
+        return Math.max(minHeight, exactHeight, 1);
+    },
+
     updateSliderScroll() {
         if (!this.scroller) return;
         const scrollTop = this.scroller.scrollTop;
@@ -30,7 +38,7 @@ module.exports = {
             0,
             this.scroller.scrollHeight - this.scroller.clientHeight
         );
-        const sliderHeight = Math.max(1, this.scroller.clientHeight * yScale);
+        const sliderHeight = this.getSliderVisualHeight();
         const maxTop = (this.topOffset || 0) + maxScroll * yScale;
         const boxTop = Math.max(
             this.topOffset || 0,
@@ -60,7 +68,7 @@ module.exports = {
             this.scroller.scrollHeight - this.scroller.clientHeight
         );
         const rect = this.getMinimapDragZoneRect();
-        const y = clientY - rect.top - this.scroller.clientHeight * yScale / 2;
+        const y = clientY - rect.top - this.getSliderVisualHeight() / 2;
         this.scroller.scrollTop = Math.max(
             0,
             Math.min(maxScroll, y / yScale)
