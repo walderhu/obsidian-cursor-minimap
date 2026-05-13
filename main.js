@@ -835,6 +835,24 @@ module.exports = {
 },
 "js/minimap-scroll": function(require, module, exports) {
 module.exports = {
+    isPointerInsideMinimapDragZone(event) {
+        if (!this.container) return false;
+
+        const containerRect = this.container.getBoundingClientRect();
+        const minimapWidth = Math.max(
+            1,
+            containerRect.width * (this.scale || 1)
+        );
+        const left = containerRect.right - minimapWidth;
+
+        return (
+            event.clientX >= left &&
+            event.clientX <= containerRect.right &&
+            event.clientY >= containerRect.top &&
+            event.clientY <= containerRect.bottom
+        );
+    },
+
     updateSliderScroll() {
         if (!this.scroller) return;
         const scrollTop = this.scroller.scrollTop;
@@ -915,6 +933,7 @@ module.exports = {
 
     onMinimapDragMove(event) {
         if (!this.isMinimapDragging) return;
+        if (!this.isPointerInsideMinimapDragZone(event)) return;
         this.minimapScrollToY(event.clientY);
     },
 
@@ -941,6 +960,7 @@ module.exports = {
 
     onSliderMouseMove(event) {
         if (!this.isDragging) return;
+        if (!this.isPointerInsideMinimapDragZone(event)) return;
 
         const editorRect = this.element.getBoundingClientRect();
         let offsetY =
