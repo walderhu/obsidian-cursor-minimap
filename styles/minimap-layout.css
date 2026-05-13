@@ -1,0 +1,33 @@
+.minimap-container {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 100%;
+    pointer-events: none;
+    z-index: 30;
+    overflow: hidden;
+}
+
+.minimap-click-overlay {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: calc(100% * var(--scale));
+    height: 100%;
+    z-index: 1;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.view-content:has(.minimap-container:not([style*="display: none"])) .cm-scroller,
+.view-content:has(.minimap-container:not([style*="display: none"])) .markdown-preview-view {
+    padding-right: var(--cursor-minimap-reserved, 132px) !important;
+    box-sizing: border-box;
+}
+
+.view-content:has(.minimap-container:not([style*="display: none"])) .cm-content,
+.view-content:has(.minimap-container:not([style*="display: none"])) .markdown-preview-sizer {
+    padding-right: 12px !important;
+    box-sizing: border-box;
+}

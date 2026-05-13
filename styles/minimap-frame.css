@@ -1,0 +1,14 @@
+.minimap-frame {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100%;
+    pointer-events: none;
+    transform: scale(var(--scale), var(--y-scale, var(--scale)));
+    transform-origin: top right;
+    z-index: 1;
+}
+
+.minimap-frame ::-webkit-scrollbar {
+    display: none !important;
+}
