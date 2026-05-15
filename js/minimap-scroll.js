@@ -55,18 +55,28 @@ module.exports = {
         const topOffset = this.topOffset || 0;
         const effectiveHeight = this.effectiveIframeHeight || this.fullHeight;
 
+        if (scrollTop !== this._lastScrollTop) {
+            this._manualMinimapScroll = false;
+            this._lastScrollTop = scrollTop;
+        }
+
         const sliderHeight = Math.max(1, this.scroller.clientHeight * this.yScale);
         const editorMaxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
         const scrollRatio = scrollTop / editorMaxScroll;
 
-        // VSCode formula: slider moves proportionally through minimap,
-        // minimap scrolls slower than editor to keep slider always visible
         const BOTTOM_PADDING = 8;
-        const sliderTargetTop = scrollRatio * (this.visibleHeight - sliderHeight - topOffset - BOTTOM_PADDING);
         const rawSliderAbsTop = scrollTop * this.yScale + topOffset;
         const scaledDocHeight = effectiveHeight * this.yScale;
         const maxMinimapScroll = Math.max(0, scaledDocHeight - this.visibleHeight + topOffset);
-        this.minimapScrollTop = Math.max(0, Math.min(maxMinimapScroll, rawSliderAbsTop - sliderTargetTop));
+
+        if (this._manualMinimapScroll) {
+            // independent minimap scroll — just clamp, don't override
+            this.minimapScrollTop = Math.max(0, Math.min(this.minimapScrollTop || 0, maxMinimapScroll));
+        } else {
+            // VSCode auto-follow
+            const sliderTargetTop = scrollRatio * (this.visibleHeight - sliderHeight - topOffset - BOTTOM_PADDING);
+            this.minimapScrollTop = Math.max(0, Math.min(maxMinimapScroll, rawSliderAbsTop - sliderTargetTop));
+        }
 
         const sliderTop = rawSliderAbsTop - this.minimapScrollTop;
 
@@ -132,13 +142,17 @@ module.exports = {
     onMinimapWheel(event) {
         event.preventDefault();
         event.stopPropagation();
-        if (!this.scroller) return;
+        if (!this.yScale || !this.fullHeight) return;
         const delta = event.deltaMode === 1
             ? event.deltaY * 40
             : event.deltaMode === 2
-              ? event.deltaY * this.scroller.clientHeight
+              ? event.deltaY * this.visibleHeight
               : event.deltaY;
-        this.scroller.scrollTop += delta;
+        const effectiveHeight = this.effectiveIframeHeight || this.fullHeight;
+        const scaledDocHeight = effectiveHeight * this.yScale;
+        const maxScroll = Math.max(0, scaledDocHeight - this.visibleHeight + (this.topOffset || 0));
+        this.minimapScrollTop = Math.max(0, Math.min(maxScroll, (this.minimapScrollTop || 0) + delta));
+        this._manualMinimapScroll = true;
         this.updateSliderScroll();
     },
 
