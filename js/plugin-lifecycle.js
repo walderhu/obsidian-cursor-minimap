@@ -105,6 +105,7 @@ module.exports = {
         this.registerLayoutChangeHandler(updateHelpers);
 
         await this.loadSettings();
+        await this.initDiskCache();
         this.addSettingTab(new MinimapSettingTab(this));
         this.app.workspace.onLayoutReady(() => {
             this.activeNoteView =

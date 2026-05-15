@@ -18,13 +18,11 @@ module.exports = {
         try {
             if (!noteContent) {
                 const currentFile = this.getCurrentFile();
+                const mtime = currentFile?.stat?.mtime;
                 const cache = this.plugin.snapshotCache;
-                if (
-                    cache.html &&
-                    currentFile &&
-                    cache.filePath === currentFile.path &&
-                    cache.mtime === currentFile.stat?.mtime
-                ) {
+
+                // 1. memory cache hit
+                if (cache.html && currentFile && cache.filePath === currentFile.path && cache.mtime === mtime) {
                     if (this.iframe && cache.html !== this.lastIframeHTML) {
                         this.lastIframeHTML = cache.html;
                         this.hasMeasuredIframeHeight = false;
@@ -32,6 +30,21 @@ module.exports = {
                     }
                     return;
                 }
+
+                // 2. disk cache hit
+                if (currentFile && mtime) {
+                    const diskHtml = await this.plugin.loadFromDiskCache(currentFile.path, mtime);
+                    if (diskHtml) {
+                        this.plugin.snapshotCache = { filePath: currentFile.path, mtime, html: diskHtml };
+                        if (this.iframe && diskHtml !== this.lastIframeHTML) {
+                            this.lastIframeHTML = diskHtml;
+                            this.hasMeasuredIframeHeight = false;
+                            this.iframe.srcdoc = diskHtml;
+                        }
+                        return;
+                    }
+                }
+
                 noteContent = await this.getFullHTML();
             }
             if (!noteContent) return;
@@ -84,11 +97,13 @@ module.exports = {
                 this.hasMeasuredIframeHeight = false;
                 this.iframe.srcdoc = html;
                 const cacheFile = this.getCurrentFile();
+                const cacheMtime = cacheFile?.stat?.mtime || null;
                 this.plugin.snapshotCache = {
                     filePath: cacheFile?.path || null,
-                    mtime: cacheFile?.stat?.mtime || null,
+                    mtime: cacheMtime,
                     html,
                 };
+                this.plugin.saveToDiskCache(cacheFile?.path, cacheMtime, html);
             }
         } finally {
             this.isUpdatingIframe = false;
@@ -149,11 +164,13 @@ module.exports = {
 		</html>
 	`;
 
+        const cacheMtime = currentFile.stat?.mtime || null;
         this.plugin.snapshotCache = {
             filePath: currentFile.path,
-            mtime: currentFile.stat?.mtime || null,
+            mtime: cacheMtime,
             html,
         };
+        this.plugin.saveToDiskCache(currentFile.path, cacheMtime, html);
     },
 
     onIframeLoad() {

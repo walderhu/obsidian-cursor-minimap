@@ -8,6 +8,7 @@ const lifecycleMethods = require("./js/plugin-lifecycle");
 const settingsMethods = require("./js/plugin-settings");
 const minimapManagerMethods = require("./js/plugin-minimap-manager");
 const helperLeafMethods = require("./js/plugin-helper-leaves");
+const diskCacheMethods = require("./js/plugin-disk-cache");
 
 class NoteMinimap extends Plugin {
     activeNoteView = null;
@@ -23,7 +24,8 @@ Object.assign(
     lifecycleMethods,
     settingsMethods,
     minimapManagerMethods,
-    helperLeafMethods
+    helperLeafMethods,
+    diskCacheMethods
 );
 
 module.exports = NoteMinimap;
@@ -137,6 +139,7 @@ module.exports = {
         this.registerLayoutChangeHandler(updateHelpers);
 
         await this.loadSettings();
+        await this.initDiskCache();
         this.addSettingTab(new MinimapSettingTab(this));
         this.app.workspace.onLayoutReady(() => {
             this.activeNoteView =
@@ -419,6 +422,72 @@ module.exports = {
             type: "markdown",
             state: newState,
         });
+    },
+};
+
+},
+"js/plugin-disk-cache": function(require, module, exports) {
+const CACHE_SUBDIR = "temp";
+
+module.exports = {
+    async initDiskCache() {
+        this._cacheDir = `${this.manifest.dir}/${CACHE_SUBDIR}`;
+        if (!await this.app.vault.adapter.exists(this._cacheDir)) {
+            await this.app.vault.adapter.mkdir(this._cacheDir);
+        }
+        this.cleanupDiskCache().catch(() => {});
+    },
+
+    _getCacheKey(filePath) {
+        return encodeURIComponent(filePath);
+    },
+
+    async loadFromDiskCache(filePath, mtime) {
+        if (!this._cacheDir || !filePath || !mtime) return null;
+        try {
+            const key = this._getCacheKey(filePath);
+            const metaPath = `${this._cacheDir}/${key}.json`;
+            if (!await this.app.vault.adapter.exists(metaPath)) return null;
+            const meta = JSON.parse(await this.app.vault.adapter.read(metaPath));
+            if (meta.mtime !== mtime) return null;
+            const htmlPath = `${this._cacheDir}/${key}.html`;
+            if (!await this.app.vault.adapter.exists(htmlPath)) return null;
+            return await this.app.vault.adapter.read(htmlPath);
+        } catch {
+            return null;
+        }
+    },
+
+    saveToDiskCache(filePath, mtime, html) {
+        if (!this._cacheDir || !filePath || !mtime || !html) return;
+        const key = this._getCacheKey(filePath);
+        this.app.vault.adapter
+            .write(`${this._cacheDir}/${key}.json`, JSON.stringify({ filePath, mtime }))
+            .catch(() => {});
+        this.app.vault.adapter
+            .write(`${this._cacheDir}/${key}.html`, html)
+            .catch(() => {});
+    },
+
+    async cleanupDiskCache() {
+        if (!this._cacheDir) return;
+        try {
+            if (!await this.app.vault.adapter.exists(this._cacheDir)) return;
+            const listing = await this.app.vault.adapter.list(this._cacheDir);
+            for (const filePath of listing.files) {
+                if (!filePath.endsWith(".json")) continue;
+                try {
+                    const meta = JSON.parse(await this.app.vault.adapter.read(filePath));
+                    if (!this.app.vault.getAbstractFileByPath(meta.filePath)) {
+                        await this.app.vault.adapter.remove(filePath);
+                        const htmlPath = filePath.replace(/\.json$/, ".html");
+                        if (await this.app.vault.adapter.exists(htmlPath)) {
+                            await this.app.vault.adapter.remove(htmlPath);
+                        }
+                    }
+                } catch { /* skip corrupted entries */ }
+            }
+        } catch { /* ignore cleanup errors */ }
     },
 };
 
@@ -772,13 +841,11 @@ module.exports = {
         try {
             if (!noteContent) {
                 const currentFile = this.getCurrentFile();
+                const mtime = currentFile?.stat?.mtime;
                 const cache = this.plugin.snapshotCache;
-                if (
-                    cache.html &&
-                    currentFile &&
-                    cache.filePath === currentFile.path &&
-                    cache.mtime === currentFile.stat?.mtime
-                ) {
+
+                // 1. memory cache hit
+                if (cache.html && currentFile && cache.filePath === currentFile.path && cache.mtime === mtime) {
                     if (this.iframe && cache.html !== this.lastIframeHTML) {
                         this.lastIframeHTML = cache.html;
                         this.hasMeasuredIframeHeight = false;
@@ -786,6 +853,21 @@ module.exports = {
                     }
                     return;
                 }
+
+                // 2. disk cache hit
+                if (currentFile && mtime) {
+                    const diskHtml = await this.plugin.loadFromDiskCache(currentFile.path, mtime);
+                    if (diskHtml) {
+                        this.plugin.snapshotCache = { filePath: currentFile.path, mtime, html: diskHtml };
+                        if (this.iframe && diskHtml !== this.lastIframeHTML) {
+                            this.lastIframeHTML = diskHtml;
+                            this.hasMeasuredIframeHeight = false;
+                            this.iframe.srcdoc = diskHtml;
+                        }
+                        return;
+                    }
+                }
+
                 noteContent = await this.getFullHTML();
             }
             if (!noteContent) return;
@@ -838,11 +920,13 @@ module.exports = {
                 this.hasMeasuredIframeHeight = false;
                 this.iframe.srcdoc = html;
                 const cacheFile = this.getCurrentFile();
+                const cacheMtime = cacheFile?.stat?.mtime || null;
                 this.plugin.snapshotCache = {
                     filePath: cacheFile?.path || null,
-                    mtime: cacheFile?.stat?.mtime || null,
+                    mtime: cacheMtime,
                     html,
                 };
+                this.plugin.saveToDiskCache(cacheFile?.path, cacheMtime, html);
             }
         } finally {
             this.isUpdatingIframe = false;
