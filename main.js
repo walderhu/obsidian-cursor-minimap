@@ -1040,12 +1040,17 @@ module.exports = {
         const topOffset = this.topOffset || 0;
         const effectiveHeight = this.effectiveIframeHeight || this.fullHeight;
 
+        const sliderHeight = Math.max(1, this.scroller.clientHeight * this.yScale);
+        const editorMaxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
+        const scrollRatio = scrollTop / editorMaxScroll;
+
+        const sliderTargetTop = scrollRatio * (this.visibleHeight - sliderHeight - topOffset);
+        const rawSliderAbsTop = scrollTop * this.yScale + topOffset;
         const scaledDocHeight = effectiveHeight * this.yScale;
         const maxMinimapScroll = Math.max(0, scaledDocHeight - this.visibleHeight + topOffset);
-        this.minimapScrollTop = Math.max(0, Math.min(this.minimapScrollTop || 0, maxMinimapScroll));
+        this.minimapScrollTop = Math.max(0, Math.min(maxMinimapScroll, rawSliderAbsTop - sliderTargetTop));
 
-        const sliderHeight = Math.max(1, this.scroller.clientHeight * this.yScale);
-        const sliderTop = scrollTop * this.yScale - this.minimapScrollTop + topOffset;
+        const sliderTop = rawSliderAbsTop - this.minimapScrollTop;
 
         this.iframe.style.top = `${topOffset - this.minimapScrollTop}px`;
         this.slider.style.height = `${sliderHeight}px`;
@@ -1109,16 +1114,13 @@ module.exports = {
     onMinimapWheel(event) {
         event.preventDefault();
         event.stopPropagation();
-        if (!this.yScale || !this.fullHeight) return;
+        if (!this.scroller) return;
         const delta = event.deltaMode === 1
             ? event.deltaY * 40
             : event.deltaMode === 2
-              ? event.deltaY * this.visibleHeight
+              ? event.deltaY * this.scroller.clientHeight
               : event.deltaY;
-        const effectiveHeight = this.effectiveIframeHeight || this.fullHeight;
-        const scaledDocHeight = effectiveHeight * this.yScale;
-        const maxScroll = Math.max(0, scaledDocHeight - this.visibleHeight + (this.topOffset || 0));
-        this.minimapScrollTop = Math.max(0, Math.min(maxScroll, (this.minimapScrollTop || 0) + delta));
+        this.scroller.scrollTop += delta;
         this.updateSliderScroll();
     },
 
