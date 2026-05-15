@@ -1044,7 +1044,8 @@ module.exports = {
         const editorMaxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
         const scrollRatio = scrollTop / editorMaxScroll;
 
-        const sliderTargetTop = scrollRatio * (this.visibleHeight - sliderHeight - topOffset);
+        const BOTTOM_PADDING = 8;
+        const sliderTargetTop = scrollRatio * (this.visibleHeight - sliderHeight - topOffset - BOTTOM_PADDING);
         const rawSliderAbsTop = scrollTop * this.yScale + topOffset;
         const scaledDocHeight = effectiveHeight * this.yScale;
         const maxMinimapScroll = Math.max(0, scaledDocHeight - this.visibleHeight + topOffset);
