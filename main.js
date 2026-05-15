@@ -103,10 +103,21 @@ module.exports = {
             if (!(target instanceof Element)) return;
             if (
                 target.closest(
-                    ".callout-title, .collapse-indicator, .task-kanban-inline-action"
+                    ".callout-title, .collapse-indicator, .task-kanban-inline-action, .heading-collapse-indicator"
                 )
             ) {
-                window.setTimeout(() => this.updateElementMinimap(), 120);
+                window.setTimeout(() => {
+                    this.snapshotCache = { filePath: null, mtime: null, html: null };
+                    const activeEl = this.activeNoteView?.contentEl;
+                    if (activeEl) {
+                        const minimap = this.minimapInstances.get(activeEl);
+                        if (minimap) {
+                            minimap.lastIframeHTML = "";
+                            minimap.onResize();
+                        }
+                    }
+                    this.updateElementMinimap();
+                }, 250);
             }
         }, true);
 
@@ -472,7 +483,7 @@ class MinimapSettingTab extends PluginSettingTab {
 
         this.addSliderSetting(
             "Scale",
-            "Change the minimap scale (0.05 - 0.3)",
+            "Content zoom level. Higher = larger text, fewer lines visible. Does not affect column width (use Fixed Width for that)",
             "scale",
             0.05,
             0.3,

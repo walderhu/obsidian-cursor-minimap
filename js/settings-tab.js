@@ -46,7 +46,7 @@ class MinimapSettingTab extends PluginSettingTab {
 
         this.addSliderSetting(
             "Scale",
-            "Change the minimap scale (0.05 - 0.3)",
+            "Content zoom level. Higher = larger text, fewer lines visible. Does not affect column width (use Fixed Width for that)",
             "scale",
             0.05,
             0.3,
