@@ -5,6 +5,7 @@ const { throttle } = require("./utils");
 module.exports = {
     async onload() {
         console.log("NoteMinimap Loaded");
+        this.snapshotCache = { filePath: null, mtime: null, html: null };
 
         const resized = new Set();
         const resize = throttle(() => {
@@ -55,6 +56,15 @@ module.exports = {
         );
         this.registerEvent(
             this.app.workspace.on("editor-change", this.debouncedUpdateMinimap)
+        );
+        this.registerEvent(
+            this.app.vault.on("modify", async (file) => {
+                const leaf = this.app.workspace.getLeavesOfType("markdown")
+                    .find(l => l.view.file?.path === file.path);
+                if (!leaf) return;
+                const minimap = this.minimapInstances.get(leaf.view.contentEl);
+                if (minimap) await minimap.prerenderForCache();
+            })
         );
         this.registerDomEvent(document, "click", (event) => {
             const target = event.target;

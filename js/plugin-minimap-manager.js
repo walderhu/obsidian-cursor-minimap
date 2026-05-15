@@ -40,24 +40,21 @@ module.exports = {
 
         if (!isReadMode) {
             if (existing) {
-                existing.destroy();
-                this.minimapInstances.delete(element);
-                this.resizeObserver.unobserve(element);
+                existing.container.style.display = "none";
             }
             return;
         }
 
         if (element.classList.contains("minimap-disabled")) {
             if (existing) {
-                existing.destroy();
-                this.minimapInstances.delete(element);
-                this.resizeObserver.unobserve(element);
+                existing.container.style.display = "none";
             }
             return;
         }
 
         if (this.minimapInstances.has(element)) {
             const noteInstance = this.minimapInstances.get(element);
+            noteInstance.container.style.display = "";
             noteInstance.updateIframe();
         } else {
             const minimapInstance = new Minimap(

@@ -5,6 +5,7 @@ const minimapScrollMethods = require("./minimap-scroll");
 
 class Minimap {
     minimapScrollOffset = 0;
+    minimapScrollTop = 0;
 
     constructor(plugin, element, settings, helperLeafId) {
         this.plugin = plugin;

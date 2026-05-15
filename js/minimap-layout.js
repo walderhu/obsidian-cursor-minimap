@@ -16,7 +16,6 @@ module.exports = {
                 ".markdown-preview-view"
             )
         );
-        this.lastIframeHTML = "";
         this.updateIframe();
     },
 
@@ -36,6 +35,7 @@ module.exports = {
 
     async onResize() {
         await sleep(300);
+        if (this.container?.style.display === "none") return;
 
         const visibleHeight = this.scroller.getBoundingClientRect().height;
         const sizerHeight =
@@ -55,16 +55,12 @@ module.exports = {
     resize(fullHeight, visibleHeight) {
         this.fullHeight = Math.max(1, fullHeight || 1);
         this.visibleHeight = Math.max(1, visibleHeight || 1);
-        const availableHeight = Math.max(
-            1,
-            this.visibleHeight - (this.topOffset || 0)
-        );
-        this.yScale = Math.min(this.scale, availableHeight / this.fullHeight);
+        this.yScale = this.scale;
+        this.effectiveIframeHeight = Math.max(this.fullHeight, Math.ceil(this.visibleHeight / this.yScale));
         if (this.container) {
             this.container.style.setProperty("--y-scale", this.yScale);
         }
-        this.iframe.style.height = `${fullHeight}px`;
-        this.slider.style.height = `${this.visibleHeight * this.yScale}px`;
+        this.iframe.style.height = `${this.effectiveIframeHeight}px`;
         this.updateSliderScroll();
     },
 

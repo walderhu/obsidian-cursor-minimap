@@ -1,4 +1,3 @@
-const { Notice } = require("obsidian");
 const { sleep } = require("./utils");
 
 module.exports = {
@@ -12,28 +11,35 @@ module.exports = {
 
         const rightLeaf = this.app.workspace.getRightLeaf(false);
         this.helperLeafIds.set(leaf.id, rightLeaf.id);
+
+        if (rightLeaf.tabHeaderEl) {
+            rightLeaf.tabHeaderEl.style.setProperty("display", "none", "important");
+        }
+
         this.updateHelperForLeaf(leaf);
     },
 
     detachRedundantHelperLeavesAndRestoreMissing() {
-        this.helperLeafIds.forEach((helperLeafId, originalLeafId) => {
-            if (this.app.workspace.getLeafById(originalLeafId)) {
-                if (!this.app.workspace.getLeafById(helperLeafId)) {
+        if (this._updatingHelperLeaves) return;
+        this._updatingHelperLeaves = true;
+        try {
+            this.helperLeafIds.forEach((helperLeafId, originalLeafId) => {
+                if (this.app.workspace.getLeafById(originalLeafId)) {
+                    if (!this.app.workspace.getLeafById(helperLeafId)) {
+                        this.helperLeafIds.delete(originalLeafId);
+                        const originalLeaf =
+                            this.app.workspace.getLeafById(originalLeafId);
+                        this.openHelperForLeaf(originalLeaf);
+                    }
+                } else {
+                    const helperLeaf = this.app.workspace.getLeafById(helperLeafId);
+                    if (helperLeaf) helperLeaf.detach();
                     this.helperLeafIds.delete(originalLeafId);
-                    const originalLeaf =
-                        this.app.workspace.getLeafById(originalLeafId);
-                    this.openHelperForLeaf(originalLeaf);
-                    new Notice(
-                        "Note Minimap: This is a helper note used for Better Rendering - avoid touching it!",
-                        4000
-                    );
                 }
-            } else {
-                const helperLeaf = this.app.workspace.getLeafById(helperLeafId);
-                if (helperLeaf) helperLeaf.detach();
-                this.helperLeafIds.delete(originalLeafId);
-            }
-        });
+            });
+        } finally {
+            this._updatingHelperLeaves = false;
+        }
     },
 
     checkAndDealWithUserOpeningHelperLeaves(newActiveLeaf) {

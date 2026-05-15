@@ -1,6 +1,12 @@
 const { renderEditMode, renderReadMode } = require("./renderers");
 
 module.exports = {
+    getCurrentFile() {
+        const leaves = this.plugin.app.workspace.getLeavesOfType("markdown");
+        const view = leaves.map(l => l.view).find(v => v.contentEl === this.element);
+        return view?.file || null;
+    },
+
     async updateIframe(noteContent) {
         if (this.isUpdatingIframe) {
             this.needsIframeUpdate = true;
@@ -10,7 +16,24 @@ module.exports = {
         this.isUpdatingIframe = true;
 
         try {
-            if (!noteContent) noteContent = await this.getFullHTML();
+            if (!noteContent) {
+                const currentFile = this.getCurrentFile();
+                const cache = this.plugin.snapshotCache;
+                if (
+                    cache.html &&
+                    currentFile &&
+                    cache.filePath === currentFile.path &&
+                    cache.mtime === currentFile.stat?.mtime
+                ) {
+                    if (this.iframe && cache.html !== this.lastIframeHTML) {
+                        this.lastIframeHTML = cache.html;
+                        this.hasMeasuredIframeHeight = false;
+                        this.iframe.srcdoc = cache.html;
+                    }
+                    return;
+                }
+                noteContent = await this.getFullHTML();
+            }
             if (!noteContent) return;
 
             noteContent
@@ -36,10 +59,11 @@ module.exports = {
 		<!DOCTYPE html>
 		<html>
 		<head>${stylesHTML}<style>${cssVars}
+        body { display: flex; flex-direction: column; min-height: 100%; }
         .cursor-minimap-bottom-overscroll {
-            height: ${bottomOverscrollHeight}px;
+            flex: 1 0 auto;
+            min-height: ${bottomOverscrollHeight}px;
             background: #161616;
-            flex: 0 0 auto;
         }
         .markdown-reading-view,
         .markdown-preview-view,
@@ -59,6 +83,12 @@ module.exports = {
                 this.lastIframeHTML = html;
                 this.hasMeasuredIframeHeight = false;
                 this.iframe.srcdoc = html;
+                const cacheFile = this.getCurrentFile();
+                this.plugin.snapshotCache = {
+                    filePath: cacheFile?.path || null,
+                    mtime: cacheFile?.stat?.mtime || null,
+                    html,
+                };
             }
         } finally {
             this.isUpdatingIframe = false;
@@ -67,6 +97,63 @@ module.exports = {
                 window.setTimeout(() => this.updateIframe(), 0);
             }
         }
+    },
+
+    async prerenderForCache() {
+        if (this.isUpdatingIframe) return;
+        const currentFile = this.getCurrentFile();
+        if (!currentFile) return;
+
+        const noteContent = await renderReadMode(this.plugin, this.element);
+        if (!noteContent) return;
+
+        noteContent
+            .querySelectorAll(".minimap-frame, .minimap-slider")
+            .forEach((el) => el.remove());
+        this.syncTaskKanbanCollapse(noteContent);
+
+        const stylesHTML = this.plugin.getStylesHTML();
+        const themeClass = document.body.classList.contains("theme-dark")
+            ? "theme-dark"
+            : "theme-light";
+        const cssVars = this.plugin.getCssVars();
+        const sizerHeight =
+            this.scroller?.firstChild?.getBoundingClientRect().height || 0;
+        const scrollHeight = this.scroller?.scrollHeight || 0;
+        const bottomOverscrollHeight = Math.max(
+            0,
+            this.bottomOverscrollHeight || scrollHeight - sizerHeight
+        );
+
+        const html = `
+		<!DOCTYPE html>
+		<html>
+		<head>${stylesHTML}<style>${cssVars}
+        body { display: flex; flex-direction: column; min-height: 100%; }
+        .cursor-minimap-bottom-overscroll {
+            flex: 1 0 auto;
+            min-height: ${bottomOverscrollHeight}px;
+            background: #161616;
+        }
+        .markdown-reading-view,
+        .markdown-preview-view,
+        .markdown-preview-sizer,
+        .markdown-preview-section {
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }
+        </style></head>
+		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
+		</html>
+	`;
+
+        this.plugin.snapshotCache = {
+            filePath: currentFile.path,
+            mtime: currentFile.stat?.mtime || null,
+            html,
+        };
     },
 
     onIframeLoad() {

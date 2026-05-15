@@ -37,6 +37,7 @@ const { throttle } = require("./utils");
 module.exports = {
     async onload() {
         console.log("NoteMinimap Loaded");
+        this.snapshotCache = { filePath: null, mtime: null, html: null };
 
         const resized = new Set();
         const resize = throttle(() => {
@@ -87,6 +88,15 @@ module.exports = {
         );
         this.registerEvent(
             this.app.workspace.on("editor-change", this.debouncedUpdateMinimap)
+        );
+        this.registerEvent(
+            this.app.vault.on("modify", async (file) => {
+                const leaf = this.app.workspace.getLeavesOfType("markdown")
+                    .find(l => l.view.file?.path === file.path);
+                if (!leaf) return;
+                const minimap = this.minimapInstances.get(leaf.view.contentEl);
+                if (minimap) await minimap.prerenderForCache();
+            })
         );
         this.registerDomEvent(document, "click", (event) => {
             const target = event.target;
@@ -264,24 +274,21 @@ module.exports = {
 
         if (!isReadMode) {
             if (existing) {
-                existing.destroy();
-                this.minimapInstances.delete(element);
-                this.resizeObserver.unobserve(element);
+                existing.container.style.display = "none";
             }
             return;
         }
 
         if (element.classList.contains("minimap-disabled")) {
             if (existing) {
-                existing.destroy();
-                this.minimapInstances.delete(element);
-                this.resizeObserver.unobserve(element);
+                existing.container.style.display = "none";
             }
             return;
         }
 
         if (this.minimapInstances.has(element)) {
             const noteInstance = this.minimapInstances.get(element);
+            noteInstance.container.style.display = "";
             noteInstance.updateIframe();
         } else {
             const minimapInstance = new Minimap(
@@ -324,7 +331,6 @@ module.exports = {
 
 },
 "js/plugin-helper-leaves": function(require, module, exports) {
-const { Notice } = require("obsidian");
 const { sleep } = require("./utils");
 
 module.exports = {
@@ -338,28 +344,35 @@ module.exports = {
 
         const rightLeaf = this.app.workspace.getRightLeaf(false);
         this.helperLeafIds.set(leaf.id, rightLeaf.id);
+
+        if (rightLeaf.tabHeaderEl) {
+            rightLeaf.tabHeaderEl.style.setProperty("display", "none", "important");
+        }
+
         this.updateHelperForLeaf(leaf);
     },
 
     detachRedundantHelperLeavesAndRestoreMissing() {
-        this.helperLeafIds.forEach((helperLeafId, originalLeafId) => {
-            if (this.app.workspace.getLeafById(originalLeafId)) {
-                if (!this.app.workspace.getLeafById(helperLeafId)) {
+        if (this._updatingHelperLeaves) return;
+        this._updatingHelperLeaves = true;
+        try {
+            this.helperLeafIds.forEach((helperLeafId, originalLeafId) => {
+                if (this.app.workspace.getLeafById(originalLeafId)) {
+                    if (!this.app.workspace.getLeafById(helperLeafId)) {
+                        this.helperLeafIds.delete(originalLeafId);
+                        const originalLeaf =
+                            this.app.workspace.getLeafById(originalLeafId);
+                        this.openHelperForLeaf(originalLeaf);
+                    }
+                } else {
+                    const helperLeaf = this.app.workspace.getLeafById(helperLeafId);
+                    if (helperLeaf) helperLeaf.detach();
                     this.helperLeafIds.delete(originalLeafId);
-                    const originalLeaf =
-                        this.app.workspace.getLeafById(originalLeafId);
-                    this.openHelperForLeaf(originalLeaf);
-                    new Notice(
-                        "Note Minimap: This is a helper note used for Better Rendering - avoid touching it!",
-                        4000
-                    );
                 }
-            } else {
-                const helperLeaf = this.app.workspace.getLeafById(helperLeafId);
-                if (helperLeaf) helperLeaf.detach();
-                this.helperLeafIds.delete(originalLeafId);
-            }
-        });
+            });
+        } finally {
+            this._updatingHelperLeaves = false;
+        }
     },
 
     checkAndDealWithUserOpeningHelperLeaves(newActiveLeaf) {
@@ -518,6 +531,7 @@ const minimapScrollMethods = require("./minimap-scroll");
 
 class Minimap {
     minimapScrollOffset = 0;
+    minimapScrollTop = 0;
 
     constructor(plugin, element, settings, helperLeafId) {
         this.plugin = plugin;
@@ -639,7 +653,6 @@ module.exports = {
                 ".markdown-preview-view"
             )
         );
-        this.lastIframeHTML = "";
         this.updateIframe();
     },
 
@@ -659,6 +672,7 @@ module.exports = {
 
     async onResize() {
         await sleep(300);
+        if (this.container?.style.display === "none") return;
 
         const visibleHeight = this.scroller.getBoundingClientRect().height;
         const sizerHeight =
@@ -678,16 +692,12 @@ module.exports = {
     resize(fullHeight, visibleHeight) {
         this.fullHeight = Math.max(1, fullHeight || 1);
         this.visibleHeight = Math.max(1, visibleHeight || 1);
-        const availableHeight = Math.max(
-            1,
-            this.visibleHeight - (this.topOffset || 0)
-        );
-        this.yScale = Math.min(this.scale, availableHeight / this.fullHeight);
+        this.yScale = this.scale;
+        this.effectiveIframeHeight = Math.max(this.fullHeight, Math.ceil(this.visibleHeight / this.yScale));
         if (this.container) {
             this.container.style.setProperty("--y-scale", this.yScale);
         }
-        this.iframe.style.height = `${fullHeight}px`;
-        this.slider.style.height = `${this.visibleHeight * this.yScale}px`;
+        this.iframe.style.height = `${this.effectiveIframeHeight}px`;
         this.updateSliderScroll();
     },
 
@@ -729,6 +739,12 @@ module.exports = {
 const { renderEditMode, renderReadMode } = require("./renderers");
 
 module.exports = {
+    getCurrentFile() {
+        const leaves = this.plugin.app.workspace.getLeavesOfType("markdown");
+        const view = leaves.map(l => l.view).find(v => v.contentEl === this.element);
+        return view?.file || null;
+    },
+
     async updateIframe(noteContent) {
         if (this.isUpdatingIframe) {
             this.needsIframeUpdate = true;
@@ -738,7 +754,24 @@ module.exports = {
         this.isUpdatingIframe = true;
 
         try {
-            if (!noteContent) noteContent = await this.getFullHTML();
+            if (!noteContent) {
+                const currentFile = this.getCurrentFile();
+                const cache = this.plugin.snapshotCache;
+                if (
+                    cache.html &&
+                    currentFile &&
+                    cache.filePath === currentFile.path &&
+                    cache.mtime === currentFile.stat?.mtime
+                ) {
+                    if (this.iframe && cache.html !== this.lastIframeHTML) {
+                        this.lastIframeHTML = cache.html;
+                        this.hasMeasuredIframeHeight = false;
+                        this.iframe.srcdoc = cache.html;
+                    }
+                    return;
+                }
+                noteContent = await this.getFullHTML();
+            }
             if (!noteContent) return;
 
             noteContent
@@ -764,10 +797,11 @@ module.exports = {
 		<!DOCTYPE html>
 		<html>
 		<head>${stylesHTML}<style>${cssVars}
+        body { display: flex; flex-direction: column; min-height: 100%; }
         .cursor-minimap-bottom-overscroll {
-            height: ${bottomOverscrollHeight}px;
+            flex: 1 0 auto;
+            min-height: ${bottomOverscrollHeight}px;
             background: #161616;
-            flex: 0 0 auto;
         }
         .markdown-reading-view,
         .markdown-preview-view,
@@ -787,6 +821,12 @@ module.exports = {
                 this.lastIframeHTML = html;
                 this.hasMeasuredIframeHeight = false;
                 this.iframe.srcdoc = html;
+                const cacheFile = this.getCurrentFile();
+                this.plugin.snapshotCache = {
+                    filePath: cacheFile?.path || null,
+                    mtime: cacheFile?.stat?.mtime || null,
+                    html,
+                };
             }
         } finally {
             this.isUpdatingIframe = false;
@@ -795,6 +835,63 @@ module.exports = {
                 window.setTimeout(() => this.updateIframe(), 0);
             }
         }
+    },
+
+    async prerenderForCache() {
+        if (this.isUpdatingIframe) return;
+        const currentFile = this.getCurrentFile();
+        if (!currentFile) return;
+
+        const noteContent = await renderReadMode(this.plugin, this.element);
+        if (!noteContent) return;
+
+        noteContent
+            .querySelectorAll(".minimap-frame, .minimap-slider")
+            .forEach((el) => el.remove());
+        this.syncTaskKanbanCollapse(noteContent);
+
+        const stylesHTML = this.plugin.getStylesHTML();
+        const themeClass = document.body.classList.contains("theme-dark")
+            ? "theme-dark"
+            : "theme-light";
+        const cssVars = this.plugin.getCssVars();
+        const sizerHeight =
+            this.scroller?.firstChild?.getBoundingClientRect().height || 0;
+        const scrollHeight = this.scroller?.scrollHeight || 0;
+        const bottomOverscrollHeight = Math.max(
+            0,
+            this.bottomOverscrollHeight || scrollHeight - sizerHeight
+        );
+
+        const html = `
+		<!DOCTYPE html>
+		<html>
+		<head>${stylesHTML}<style>${cssVars}
+        body { display: flex; flex-direction: column; min-height: 100%; }
+        .cursor-minimap-bottom-overscroll {
+            flex: 1 0 auto;
+            min-height: ${bottomOverscrollHeight}px;
+            background: #161616;
+        }
+        .markdown-reading-view,
+        .markdown-preview-view,
+        .markdown-preview-sizer,
+        .markdown-preview-section {
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }
+        </style></head>
+		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
+		</html>
+	`;
+
+        this.plugin.snapshotCache = {
+            filePath: currentFile.path,
+            mtime: currentFile.stat?.mtime || null,
+            html,
+        };
     },
 
     onIframeLoad() {
@@ -861,9 +958,7 @@ module.exports = {
 "js/minimap-scroll": function(require, module, exports) {
 module.exports = {
     getMinimapDragZoneRect() {
-        const rect = this.iframe?.getBoundingClientRect();
-        if (rect?.width && rect?.height) return rect;
-        return this.container?.getBoundingClientRect();
+        return this.container?.getBoundingClientRect() || null;
     },
 
     isPointerInsideMinimapDragZone(event) {
@@ -913,20 +1008,21 @@ module.exports = {
     },
 
     updateSliderScroll() {
-        if (!this.scroller) return;
+        if (!this.scroller || !this.yScale || !this.fullHeight) return;
         const scrollTop = this.scroller.scrollTop;
-        if (scrollTop !== this._lastScrollTop) {
-            this.minimapScrollOffset = 0;
-            this._lastScrollTop = scrollTop;
-        }
+        const topOffset = this.topOffset || 0;
+        const effectiveHeight = this.effectiveIframeHeight || this.fullHeight;
 
-        const { maxScroll, sliderHeight, topBase, travelHeight } =
-            this.getSliderTravelMetrics();
-        const scrollRatio = maxScroll ? scrollTop / maxScroll : 0;
-        const boxTop = topBase + scrollRatio * travelHeight;
-        this.iframe.style.top = `${this.topOffset || 0}px`;
+        const scaledDocHeight = effectiveHeight * this.yScale;
+        const maxMinimapScroll = Math.max(0, scaledDocHeight - this.visibleHeight + topOffset);
+        this.minimapScrollTop = Math.max(0, Math.min(this.minimapScrollTop || 0, maxMinimapScroll));
+
+        const sliderHeight = Math.max(1, this.scroller.clientHeight * this.yScale);
+        const sliderTop = scrollTop * this.yScale - this.minimapScrollTop + topOffset;
+
+        this.iframe.style.top = `${topOffset - this.minimapScrollTop}px`;
         this.slider.style.height = `${sliderHeight}px`;
-        this.slider.style.top = `${boxTop}px`;
+        this.slider.style.top = `${sliderTop}px`;
     },
 
     onSliderMouseDown(event) {
@@ -942,16 +1038,12 @@ module.exports = {
     },
 
     minimapScrollToY(clientY) {
-        const rect = this.getMinimapDragZoneRect();
-        const { maxScroll, sliderHeight, travelHeight } =
-            this.getSliderTravelMetrics();
-        const y = clientY - rect.top - sliderHeight / 2;
-        const scrollRatio = travelHeight ? y / travelHeight : 0;
-        this.scroller.scrollTop = Math.max(
-            0,
-            Math.min(maxScroll, scrollRatio * maxScroll)
-        );
-        this.minimapScrollOffset = 0;
+        if (!this.yScale || !this.scroller) return;
+        const rect = this.container.getBoundingClientRect();
+        const minimapY = (clientY - rect.top) + (this.minimapScrollTop || 0) - (this.topOffset || 0);
+        const documentY = minimapY / this.yScale;
+        const maxScroll = Math.max(0, this.scroller.scrollHeight - this.scroller.clientHeight);
+        this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, documentY - this.scroller.clientHeight / 2));
         this.updateSliderScroll();
     },
 
@@ -988,17 +1080,18 @@ module.exports = {
     },
 
     onMinimapWheel(event) {
-        if (!this.scroller) return;
         event.preventDefault();
         event.stopPropagation();
-        const delta =
-            event.deltaMode === 1
-                ? event.deltaY * 40
-                : event.deltaMode === 2
-                  ? event.deltaY * this.scroller.clientHeight
-                  : event.deltaY;
-        this.scroller.scrollTop += delta;
-        this.minimapScrollOffset = 0;
+        if (!this.yScale || !this.fullHeight) return;
+        const delta = event.deltaMode === 1
+            ? event.deltaY * 40
+            : event.deltaMode === 2
+              ? event.deltaY * this.visibleHeight
+              : event.deltaY;
+        const effectiveHeight = this.effectiveIframeHeight || this.fullHeight;
+        const scaledDocHeight = effectiveHeight * this.yScale;
+        const maxScroll = Math.max(0, scaledDocHeight - this.visibleHeight + (this.topOffset || 0));
+        this.minimapScrollTop = Math.max(0, Math.min(maxScroll, (this.minimapScrollTop || 0) + delta));
         this.updateSliderScroll();
     },
 
@@ -1009,19 +1102,11 @@ module.exports = {
             return;
         }
 
-        const zoneRect = this.getMinimapDragZoneRect();
-        let offsetY =
-            event.clientY -
-            zoneRect.top -
-            this.dragOffsetY;
-
-        const { maxScroll, travelHeight } = this.getSliderTravelMetrics();
-
-        offsetY = Math.max(0, Math.min(offsetY, travelHeight));
-        this.scroller.scrollTop = travelHeight
-            ? (offsetY / travelHeight) * maxScroll
-            : 0;
-
+        const rect = this.container.getBoundingClientRect();
+        const sliderTopInContainer = event.clientY - rect.top - this.dragOffsetY;
+        const newScrollTop = (sliderTopInContainer + this.minimapScrollTop - (this.topOffset || 0)) / this.yScale;
+        const maxScroll = Math.max(0, this.scroller.scrollHeight - this.scroller.clientHeight);
+        this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, newScrollTop));
         this.updateSliderScroll();
     },
 
