@@ -94,9 +94,7 @@ module.exports = {
 
     updateReservedWidth() {
         if (!this.element) return;
-        const width = this.minimapWidth > 0
-            ? this.minimapWidth + 12
-            : Math.ceil(this.element.clientWidth * (this.scale || 0.12) + 12);
+        const width = Math.ceil(this.element.clientWidth * (this.scale || 0.12) + 12);
         this.element.style.setProperty("--cursor-minimap-reserved", `${width}px`);
     },
 };

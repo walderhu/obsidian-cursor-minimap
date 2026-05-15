@@ -7,7 +7,6 @@ module.exports = {
 
     updateSettings(settings) {
         this.scale = settings.scale;
-        this.minimapWidth = settings.minimapWidth || 0;
         this.minimapOpacity = settings.minimapOpacity;
         this.sliderOpacity = settings.sliderOpacity;
         this.topOffset = settings.topOffset;

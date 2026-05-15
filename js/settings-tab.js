@@ -25,7 +25,7 @@ class MinimapSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName("Better Rendering (in development)")
             .setDesc(
-                "Use a hidden helper note to render the minimap, improving flickering and consistent loading. Changing this will trigger a plugin restart"
+                "Use a hidden helper note to render the minimap, improving flickering. Changing this restarts the plugin"
             )
             .addToggle((toggle) => {
                 toggle
@@ -33,72 +33,89 @@ class MinimapSettingTab extends PluginSettingTab {
                     .onChange(async (value) => {
                         this.plugin.settings.betterRendering = value;
                         await this.plugin.saveSettings();
-
                         await this.app.plugins.disablePlugin("cursor-minimap");
                         await this.app.plugins.enablePlugin("cursor-minimap");
                         this.app.setting.openTabById("cursor-minimap");
-                        new Notice(
-                            "Note Minimap: Restarted plugin for Better Rendering change.",
-                            3000
-                        );
+                        new Notice("Note Minimap: Restarted plugin for Better Rendering change.", 3000);
                     });
             });
 
-        this.addSliderSetting(
+        this.addSliderWithInput(
             "Scale",
-            "Content zoom level. Higher = larger text, fewer lines visible. Does not affect column width (use Fixed Width for that)",
-            "scale",
-            0.05,
-            0.3,
-            0.01
+            "Content zoom level — controls column width and text size in the minimap",
+            "scale", 0.05, 0.3, 0.01,
+            (v) => `${Math.round(v * 100)}%`,
+            (s) => { const n = parseFloat(s); return n > 1 ? n / 100 : n; }
         );
-        this.addSliderSetting(
-            "Fixed Width (px)",
-            "Fixed minimap width in pixels. 0 = auto (uses Scale setting)",
-            "minimapWidth",
-            0,
-            400,
-            1
-        );
-        this.addSliderSetting(
+        this.addSliderWithInput(
             "Opacity",
-            "Change the minimap's background opacity (0.05 - 1)",
-            "minimapOpacity",
-            0.05,
-            1,
-            0.01
+            "Background opacity of the minimap",
+            "minimapOpacity", 0.05, 1, 0.01,
+            (v) => `${Math.round(v * 100)}%`,
+            (s) => { const n = parseFloat(s); return n > 1 ? n / 100 : n; }
         );
-        this.addSliderSetting(
+        this.addSliderWithInput(
             "Slider Opacity",
-            "Change the slider opacity (0.05 - 1)",
-            "sliderOpacity",
-            0.05,
-            1,
-            0.01
+            "Opacity of the viewport indicator rectangle",
+            "sliderOpacity", 0.05, 1, 0.01,
+            (v) => `${Math.round(v * 100)}%`,
+            (s) => { const n = parseFloat(s); return n > 1 ? n / 100 : n; }
         );
-        this.addSliderSetting(
+        this.addSliderWithInput(
             "Top Offset",
-            "Offset the minimap from the top (pixels) - for special plugin toolbars",
-            "topOffset",
-            0,
-            100,
-            1
+            "Push minimap down from the top edge (px) — for plugin toolbars",
+            "topOffset", 0, 100, 1,
+            (v) => `${v}px`,
+            (s) => parseInt(s)
         );
+
+        new Setting(containerEl)
+            .addButton((btn) => {
+                btn.setButtonText("Apply")
+                    .setCta()
+                    .onClick(async () => {
+                        await this.plugin.saveSettings();
+                        new Notice("Note Minimap: settings applied.", 1500);
+                    });
+            });
     }
 
-    addSliderSetting(name, description, key, min, max, step) {
+    addSliderWithInput(name, description, key, min, max, step, format, parse) {
+        let sliderComp, textComp;
         new Setting(this.containerEl)
             .setName(name)
             .setDesc(description)
             .addSlider((slider) => {
+                sliderComp = slider;
                 slider
                     .setLimits(min, max, step)
                     .setValue(this.plugin.settings[key])
                     .setDynamicTooltip()
                     .onChange((value) => {
                         this.plugin.settings[key] = value;
+                        textComp?.setValue(format(value));
                         this.plugin.saveSettings();
                     });
+            })
+            .addText((text) => {
+                textComp = text;
+                text.setValue(format(this.plugin.settings[key]));
+                text.inputEl.style.width = "58px";
+                text.inputEl.style.textAlign = "right";
+
+                const applyText = () => {
+                    const parsed = parse(text.getValue());
+                    if (!isFinite(parsed)) return;
+                    const val = +Math.max(min, Math.min(max, parsed)).toFixed(4);
+                    this.plugin.settings[key] = val;
+                    sliderComp?.setValue(val);
+                    text.setValue(format(val));
+                    this.plugin.saveSettings();
+                };
+                text.inputEl.addEventListener("blur", applyText);
+                text.inputEl.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") applyText();
+                });
             });
     }
 }
