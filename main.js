@@ -75,7 +75,13 @@ module.exports = {
                 this.updateElementMinimap();
 
                 if (newActiveLeaf?.view?.getViewType() === "markdown") {
-                    if (this.settings.betterRendering) this.openHelperForLeaf(newActiveLeaf);
+                    if (this.settings.betterRendering) {
+                        clearTimeout(this._helperLeafTimer);
+                        this._helperLeafTimer = window.setTimeout(
+                            () => this.openHelperForLeaf(newActiveLeaf),
+                            600
+                        );
+                    }
                     this.addToggleButtonToLeaf(newActiveLeaf);
                 }
             })
@@ -408,28 +414,11 @@ module.exports = {
         );
         if (!helperLeaf) return;
 
-        const oldState = helperLeaf.view.getState();
         const newState = leaf.view.getState();
         await helperLeaf.setViewState({
             type: "markdown",
             state: newState,
         });
-        if (oldState.file !== newState.file) {
-            await this.initialForceloadContentInMarkdownView(helperLeaf.view);
-        }
-    },
-
-    async initialForceloadContentInMarkdownView(view) {
-        if (view?.getViewType() !== "markdown") return;
-        view.contentEl
-            .querySelectorAll(".markdown-preview-sizer, .cm-sizer")
-            .forEach((el) => {
-                el.style = "transform-origin: top right; scale: .1;";
-            });
-        const data = await view.getViewData();
-        await view.clear();
-        await sleep(100);
-        await view.setViewData(data);
     },
 };
 

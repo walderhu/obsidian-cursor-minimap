@@ -43,7 +43,13 @@ module.exports = {
                 this.updateElementMinimap();
 
                 if (newActiveLeaf?.view?.getViewType() === "markdown") {
-                    if (this.settings.betterRendering) this.openHelperForLeaf(newActiveLeaf);
+                    if (this.settings.betterRendering) {
+                        clearTimeout(this._helperLeafTimer);
+                        this._helperLeafTimer = window.setTimeout(
+                            () => this.openHelperForLeaf(newActiveLeaf),
+                            600
+                        );
+                    }
                     this.addToggleButtonToLeaf(newActiveLeaf);
                 }
             })

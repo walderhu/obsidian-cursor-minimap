@@ -1,5 +1,3 @@
-const { sleep } = require("./utils");
-
 module.exports = {
     async openHelperForLeaf(leaf) {
         if (!leaf) return;
@@ -63,27 +61,10 @@ module.exports = {
         );
         if (!helperLeaf) return;
 
-        const oldState = helperLeaf.view.getState();
         const newState = leaf.view.getState();
         await helperLeaf.setViewState({
             type: "markdown",
             state: newState,
         });
-        if (oldState.file !== newState.file) {
-            await this.initialForceloadContentInMarkdownView(helperLeaf.view);
-        }
-    },
-
-    async initialForceloadContentInMarkdownView(view) {
-        if (view?.getViewType() !== "markdown") return;
-        view.contentEl
-            .querySelectorAll(".markdown-preview-sizer, .cm-sizer")
-            .forEach((el) => {
-                el.style = "transform-origin: top right; scale: .1;";
-            });
-        const data = await view.getViewData();
-        await view.clear();
-        await sleep(100);
-        await view.setViewData(data);
     },
 };
