@@ -183,6 +183,7 @@ module.exports = {
                 enabledByDefault: true,
                 betterRendering: true,
                 scale: 0.12,
+                minimapWidth: 0,
                 minimapOpacity: 0.3,
                 sliderOpacity: 0.3,
                 topOffset: 0,
@@ -478,6 +479,14 @@ class MinimapSettingTab extends PluginSettingTab {
             0.01
         );
         this.addSliderSetting(
+            "Fixed Width (px)",
+            "Fixed minimap width in pixels. 0 = auto (uses Scale setting)",
+            "minimapWidth",
+            0,
+            400,
+            1
+        );
+        this.addSliderSetting(
             "Opacity",
             "Change the minimap's background opacity (0.05 - 1)",
             "minimapOpacity",
@@ -598,8 +607,13 @@ module.exports = Minimap;
 const { toRGBAAlpha } = require("./utils");
 
 module.exports = {
+    _getEffectiveScale() {
+        return this.scale;
+    },
+
     updateSettings(settings) {
         this.scale = settings.scale;
+        this.minimapWidth = settings.minimapWidth || 0;
         this.minimapOpacity = settings.minimapOpacity;
         this.sliderOpacity = settings.sliderOpacity;
         this.topOffset = settings.topOffset;
@@ -620,12 +634,10 @@ module.exports = {
     },
 
     updateSettingsInCSS() {
+        const effectiveScale = this._getEffectiveScale();
         if (this.container) {
-            this.container.style.setProperty("--scale", this.scale);
-            this.container.style.setProperty(
-                "--y-scale",
-                this.yScale || this.scale
-            );
+            this.container.style.setProperty("--scale", effectiveScale);
+            this.container.style.setProperty("--y-scale", this.yScale || effectiveScale);
         }
         if (this.slider) this.slider.style.opacity = this.sliderOpacity;
         if (this.iframe) this.iframe.style.top = `${this.topOffset}px`;
@@ -692,12 +704,14 @@ module.exports = {
     resize(fullHeight, visibleHeight) {
         this.fullHeight = Math.max(1, fullHeight || 1);
         this.visibleHeight = Math.max(1, visibleHeight || 1);
-        this.yScale = this.scale;
+        this.yScale = this._getEffectiveScale();
         this.effectiveIframeHeight = Math.max(this.fullHeight, Math.ceil(this.visibleHeight / this.yScale));
         if (this.container) {
+            this.container.style.setProperty("--scale", this.yScale);
             this.container.style.setProperty("--y-scale", this.yScale);
         }
         this.iframe.style.height = `${this.effectiveIframeHeight}px`;
+        this.updateReservedWidth();
         this.updateSliderScroll();
     },
 
@@ -728,8 +742,10 @@ module.exports = {
     },
 
     updateReservedWidth() {
-        if (!this.element || !this.scale) return;
-        const width = Math.ceil(this.element.clientWidth * this.scale + 12);
+        if (!this.element) return;
+        const width = this.minimapWidth > 0
+            ? this.minimapWidth + 12
+            : Math.ceil(this.element.clientWidth * (this.yScale || this.scale || 0.12) + 12);
         this.element.style.setProperty("--cursor-minimap-reserved", `${width}px`);
     },
 };

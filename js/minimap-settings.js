@@ -1,8 +1,13 @@
 const { toRGBAAlpha } = require("./utils");
 
 module.exports = {
+    _getEffectiveScale() {
+        return this.scale;
+    },
+
     updateSettings(settings) {
         this.scale = settings.scale;
+        this.minimapWidth = settings.minimapWidth || 0;
         this.minimapOpacity = settings.minimapOpacity;
         this.sliderOpacity = settings.sliderOpacity;
         this.topOffset = settings.topOffset;
@@ -23,12 +28,10 @@ module.exports = {
     },
 
     updateSettingsInCSS() {
+        const effectiveScale = this._getEffectiveScale();
         if (this.container) {
-            this.container.style.setProperty("--scale", this.scale);
-            this.container.style.setProperty(
-                "--y-scale",
-                this.yScale || this.scale
-            );
+            this.container.style.setProperty("--scale", effectiveScale);
+            this.container.style.setProperty("--y-scale", this.yScale || effectiveScale);
         }
         if (this.slider) this.slider.style.opacity = this.sliderOpacity;
         if (this.iframe) this.iframe.style.top = `${this.topOffset}px`;

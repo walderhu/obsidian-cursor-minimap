@@ -5,6 +5,7 @@ module.exports = {
                 enabledByDefault: true,
                 betterRendering: true,
                 scale: 0.12,
+                minimapWidth: 0,
                 minimapOpacity: 0.3,
                 sliderOpacity: 0.3,
                 topOffset: 0,

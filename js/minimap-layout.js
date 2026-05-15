@@ -55,12 +55,14 @@ module.exports = {
     resize(fullHeight, visibleHeight) {
         this.fullHeight = Math.max(1, fullHeight || 1);
         this.visibleHeight = Math.max(1, visibleHeight || 1);
-        this.yScale = this.scale;
+        this.yScale = this._getEffectiveScale();
         this.effectiveIframeHeight = Math.max(this.fullHeight, Math.ceil(this.visibleHeight / this.yScale));
         if (this.container) {
+            this.container.style.setProperty("--scale", this.yScale);
             this.container.style.setProperty("--y-scale", this.yScale);
         }
         this.iframe.style.height = `${this.effectiveIframeHeight}px`;
+        this.updateReservedWidth();
         this.updateSliderScroll();
     },
 
@@ -91,8 +93,10 @@ module.exports = {
     },
 
     updateReservedWidth() {
-        if (!this.element || !this.scale) return;
-        const width = Math.ceil(this.element.clientWidth * this.scale + 12);
+        if (!this.element) return;
+        const width = this.minimapWidth > 0
+            ? this.minimapWidth + 12
+            : Math.ceil(this.element.clientWidth * (this.yScale || this.scale || 0.12) + 12);
         this.element.style.setProperty("--cursor-minimap-reserved", `${width}px`);
     },
 };

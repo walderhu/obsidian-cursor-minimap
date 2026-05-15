@@ -53,6 +53,14 @@ class MinimapSettingTab extends PluginSettingTab {
             0.01
         );
         this.addSliderSetting(
+            "Fixed Width (px)",
+            "Fixed minimap width in pixels. 0 = auto (uses Scale setting)",
+            "minimapWidth",
+            0,
+            400,
+            1
+        );
+        this.addSliderSetting(
             "Opacity",
             "Change the minimap's background opacity (0.05 - 1)",
             "minimapOpacity",
