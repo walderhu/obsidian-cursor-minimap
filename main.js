@@ -567,15 +567,6 @@ class MinimapSettingTab extends PluginSettingTab {
             (s) => parseInt(s)
         );
 
-        new Setting(containerEl)
-            .addButton((btn) => {
-                btn.setButtonText("Apply")
-                    .setCta()
-                    .onClick(async () => {
-                        await this.plugin.saveSettings();
-                        new Notice("Note Minimap: settings applied.", 1500);
-                    });
-            });
     }
 
     addSliderWithInput(name, description, key, min, max, step, format, parse) {
