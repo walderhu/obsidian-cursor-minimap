@@ -67,21 +67,11 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: var(--cursor-minimap-reserved, 132px);
+    width: 18px;
     height: 100%;
     z-index: 29;
     pointer-events: auto;
     cursor: pointer;
-}
-
-.view-content:has(.minimap-edit-click-zone) .cm-scroller {
-    padding-right: var(--cursor-minimap-reserved, 132px) !important;
-    box-sizing: border-box;
-}
-
-.view-content:has(.minimap-edit-click-zone) .cm-content {
-    padding-right: 12px !important;
-    box-sizing: border-box;
 }
 
 .minimap-edge-toggle {
