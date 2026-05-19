@@ -4,6 +4,7 @@ const lifecycleMethods = require("./js/plugin-lifecycle");
 const settingsMethods = require("./js/plugin-settings");
 const minimapManagerMethods = require("./js/plugin-minimap-manager");
 const helperLeafMethods = require("./js/plugin-helper-leaves");
+const diskCacheMethods = require("./js/plugin-disk-cache");
 
 class NoteMinimap extends Plugin {
     activeNoteView = null;
@@ -19,7 +20,8 @@ Object.assign(
     lifecycleMethods,
     settingsMethods,
     minimapManagerMethods,
-    helperLeafMethods
+    helperLeafMethods,
+    diskCacheMethods
 );
 
 module.exports = NoteMinimap;
