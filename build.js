@@ -9,6 +9,7 @@ const jsModules = [
     ["js/plugin-settings", "js/plugin-settings.js"],
     ["js/plugin-minimap-manager", "js/plugin-minimap-manager.js"],
     ["js/plugin-helper-leaves", "js/plugin-helper-leaves.js"],
+    ["js/plugin-disk-cache", "js/plugin-disk-cache.js"],
     ["js/settings-tab", "js/settings-tab.js"],
     ["js/minimap", "js/minimap.js"],
     ["js/minimap-settings", "js/minimap-settings.js"],
