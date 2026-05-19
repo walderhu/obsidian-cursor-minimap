@@ -7,6 +7,80 @@ module.exports = {
         return view?.file || null;
     },
 
+    getCurrentView() {
+        const leaves = this.plugin.app.workspace.getLeavesOfType("markdown");
+        return leaves.map(l => l.view).find(v => v.contentEl === this.element) || null;
+    },
+
+    async getMarkdownText() {
+        const view = this.getCurrentView();
+        const file = view?.file || this.plugin.app.workspace.getActiveFile();
+        if (typeof view?.getViewData === "function") {
+            return await view.getViewData();
+        }
+        return file ? await this.plugin.app.vault.read(file) : "";
+    },
+
+    getSnapshotStats(markdown) {
+        const text = markdown || "";
+        return {
+            length: text.length,
+            lineCount: text.length ? text.split("\n").length : 0,
+            lengthBucket: Math.floor(text.length / 50),
+        };
+    },
+
+    getStatsSignature(stats) {
+        return `${stats.lineCount}:${stats.lengthBucket}`;
+    },
+
+    shouldRefreshForStats(stats, mode = this.getMode()) {
+        const currentFile = this.getCurrentFile();
+        const filePath = currentFile?.path || null;
+        const previous = this.plugin.getSnapshotIdentity?.(filePath, mode)?.stats;
+        if (!previous) return true;
+        return (
+            previous.lineCount !== stats.lineCount ||
+            previous.lengthBucket !== stats.lengthBucket
+        );
+    },
+
+    async refreshAfterEditorChange() {
+        const markdown = await this.getMarkdownText();
+        const stats = this.getSnapshotStats(markdown);
+        if (!this.shouldRefreshForStats(stats, "edit")) {
+            this.updateSliderScroll();
+            return;
+        }
+
+        await this.refreshSnapshotsForModes(["edit", "read"], stats);
+    },
+
+    async refreshSnapshotsForModes(modes, stats = null) {
+        const activeMode = this.getMode();
+        for (const mode of modes) {
+            const noteContent = await this.renderSnapshotContent(mode);
+            if (!noteContent) continue;
+            const html = this.buildSnapshotHTML(noteContent);
+            this.commitSnapshotHTML(mode, html, stats);
+            if (mode === activeMode) {
+                this.applyIframeHTML(html);
+            }
+        }
+    },
+
+    async renderSnapshotContent(mode = this.getMode()) {
+        if (mode === "edit") {
+            return await renderEditMode(
+                this.plugin,
+                this.element,
+                this.helperElement,
+                this.scroller
+            );
+        }
+        return await renderReadMode(this.plugin, this.element);
+    },
+
     async updateIframe(noteContent) {
         if (this.isUpdatingIframe) {
             this.needsIframeUpdate = true;
@@ -15,96 +89,48 @@ module.exports = {
 
         this.isUpdatingIframe = true;
 
+        let snapshotStats = null;
         try {
             if (!noteContent) {
                 const currentFile = this.getCurrentFile();
                 const mtime = currentFile?.stat?.mtime;
-                const cache = this.plugin.snapshotCache;
+                const mode = this.getMode();
+                const markdown = await this.getMarkdownText();
+                const stats = this.getSnapshotStats(markdown);
+                snapshotStats = stats;
+                const identity = {
+                    mtime,
+                    signature: mode === "edit" ? this.getStatsSignature(stats) : null,
+                    stats,
+                };
+                const cache = this.plugin.getSnapshotCache(currentFile?.path, mode);
 
                 // 1. memory cache hit
-                if (cache.html && currentFile && cache.filePath === currentFile.path && cache.mtime === mtime) {
-                    if (this.iframe && cache.html !== this.lastIframeHTML) {
-                        this.lastIframeHTML = cache.html;
-                        this.hasMeasuredIframeHeight = false;
-                        this.iframe.srcdoc = cache.html;
-                    }
+                if (cache?.html && currentFile && this.plugin.isSnapshotCacheFresh(cache, identity)) {
+                    this.applyIframeHTML(cache.html);
                     return;
                 }
 
                 // 2. disk cache hit
-                if (currentFile && mtime) {
-                    const diskHtml = await this.plugin.loadFromDiskCache(currentFile.path, mtime);
-                    if (diskHtml) {
-                        this.plugin.snapshotCache = { filePath: currentFile.path, mtime, html: diskHtml };
-                        if (this.iframe && diskHtml !== this.lastIframeHTML) {
-                            this.lastIframeHTML = diskHtml;
-                            this.hasMeasuredIframeHeight = false;
-                            this.iframe.srcdoc = diskHtml;
-                        }
+                if (currentFile) {
+                    const diskCache = await this.plugin.loadFromDiskCache(currentFile.path, mode, identity);
+                    if (diskCache) {
+                        this.plugin.setSnapshotCache(currentFile.path, mode, {
+                            ...diskCache.meta,
+                            html: diskCache.html,
+                        });
+                        this.applyIframeHTML(diskCache.html);
                         return;
                     }
                 }
 
-                noteContent = await this.getFullHTML();
+                noteContent = await this.renderSnapshotContent(mode);
             }
             if (!noteContent) return;
 
-            noteContent
-                .querySelectorAll(".minimap-frame, .minimap-slider")
-                .forEach((el) => el.remove());
-            this.syncTaskKanbanCollapse(noteContent);
-
-            const stylesHTML = this.plugin.getStylesHTML();
-            const themeClass = document.body.classList.contains("theme-dark")
-                ? "theme-dark"
-                : "theme-light";
-            const cssVars = this.plugin.getCssVars();
-            const sizerHeight =
-                this.scroller?.firstChild?.getBoundingClientRect().height || 0;
-            const scrollHeight = this.scroller?.scrollHeight || 0;
-            const bottomOverscrollHeight = Math.max(
-                0,
-                this.bottomOverscrollHeight || scrollHeight - sizerHeight
-            );
-            this.bottomOverscrollHeight = bottomOverscrollHeight;
-
-            const html = `
-		<!DOCTYPE html>
-		<html>
-		<head>${stylesHTML}<style>${cssVars}
-        body { display: flex; flex-direction: column; min-height: 100%; }
-        .cursor-minimap-bottom-overscroll {
-            flex: 1 0 auto;
-            min-height: ${bottomOverscrollHeight}px;
-            background: #161616;
-        }
-        .markdown-reading-view,
-        .markdown-preview-view,
-        .markdown-preview-sizer,
-        .markdown-preview-section {
-            height: auto !important;
-            min-height: 0 !important;
-            max-height: none !important;
-            overflow: visible !important;
-        }
-        </style></head>
-		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
-		</html>
-	`;
-
-            if (this.iframe && html !== this.lastIframeHTML) {
-                this.lastIframeHTML = html;
-                this.hasMeasuredIframeHeight = false;
-                this.iframe.srcdoc = html;
-                const cacheFile = this.getCurrentFile();
-                const cacheMtime = cacheFile?.stat?.mtime || null;
-                this.plugin.snapshotCache = {
-                    filePath: cacheFile?.path || null,
-                    mtime: cacheMtime,
-                    html,
-                };
-                this.plugin.saveToDiskCache(cacheFile?.path, cacheMtime, html);
-            }
+            const html = this.buildSnapshotHTML(noteContent);
+            this.applyIframeHTML(html);
+            this.commitSnapshotHTML(this.getMode(), html, snapshotStats);
         } finally {
             this.isUpdatingIframe = false;
             if (this.needsIframeUpdate) {
@@ -114,14 +140,7 @@ module.exports = {
         }
     },
 
-    async prerenderForCache() {
-        if (this.isUpdatingIframe) return;
-        const currentFile = this.getCurrentFile();
-        if (!currentFile) return;
-
-        const noteContent = await renderReadMode(this.plugin, this.element);
-        if (!noteContent) return;
-
+    buildSnapshotHTML(noteContent) {
         noteContent
             .querySelectorAll(".minimap-frame, .minimap-slider")
             .forEach((el) => el.remove());
@@ -139,8 +158,9 @@ module.exports = {
             0,
             this.bottomOverscrollHeight || scrollHeight - sizerHeight
         );
+        this.bottomOverscrollHeight = bottomOverscrollHeight;
 
-        const html = `
+        return `
 		<!DOCTYPE html>
 		<html>
 		<head>${stylesHTML}<style>${cssVars}
@@ -163,14 +183,42 @@ module.exports = {
 		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
 		</html>
 	`;
+    },
 
-        const cacheMtime = currentFile.stat?.mtime || null;
-        this.plugin.snapshotCache = {
-            filePath: currentFile.path,
+    applyIframeHTML(html) {
+        if (this.iframe && html !== this.lastIframeHTML) {
+            this.lastIframeHTML = html;
+            this.hasMeasuredIframeHeight = false;
+            this.iframe.srcdoc = html;
+        }
+    },
+
+    commitSnapshotHTML(mode, html, stats = null) {
+        const cacheFile = this.getCurrentFile();
+        const cacheMtime = cacheFile?.stat?.mtime || null;
+        const identityStats = stats || { length: 0, lineCount: 0, lengthBucket: 0 };
+        const identity = {
             mtime: cacheMtime,
-            html,
+            signature: mode === "edit" ? this.getStatsSignature(identityStats) : null,
+            stats: identityStats,
         };
-        this.plugin.saveToDiskCache(currentFile.path, cacheMtime, html);
+        this.plugin.setSnapshotCache(cacheFile?.path, mode, {
+            filePath: cacheFile?.path || null,
+            mode,
+            ...identity,
+            html,
+        });
+        this.plugin.saveToDiskCache(cacheFile?.path, mode, identity, html);
+    },
+
+    async prerenderForCache() {
+        if (this.isUpdatingIframe) return;
+        const currentFile = this.getCurrentFile();
+        if (!currentFile) return;
+
+        const markdown = await this.getMarkdownText();
+        const stats = this.getSnapshotStats(markdown);
+        await this.refreshSnapshotsForModes(["read", "edit"], stats);
     },
 
     onIframeLoad() {
@@ -228,7 +276,6 @@ module.exports = {
     },
 
     async getFullHTML() {
-        if (!this.isReadModeActive()) return null;
-        return await renderReadMode(this.plugin, this.element);
+        return await this.renderSnapshotContent(this.getMode());
     },
 };

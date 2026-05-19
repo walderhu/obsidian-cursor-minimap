@@ -5,7 +5,7 @@ const { throttle } = require("./utils");
 module.exports = {
     async onload() {
         console.log("NoteMinimap Loaded");
-        this.snapshotCache = { filePath: null, mtime: null, html: null };
+        this.snapshotCaches = new Map();
 
         const resized = new Set();
         const resize = throttle(() => {
@@ -56,7 +56,7 @@ module.exports = {
         );
 
         this.debouncedUpdateMinimap = debounce(
-            () => this.updateElementMinimap(),
+            () => this.onEditorChanged(),
             700,
             false
         );
@@ -81,7 +81,7 @@ module.exports = {
                 )
             ) {
                 window.setTimeout(() => {
-                    this.snapshotCache = { filePath: null, mtime: null, html: null };
+                    this.snapshotCaches.clear();
                     const activeEl = this.activeNoteView?.contentEl;
                     if (activeEl) {
                         const minimap = this.minimapInstances.get(activeEl);
@@ -157,5 +157,41 @@ module.exports = {
         this.detachAllHelperLeaves();
 
         console.log("NoteMinimap Unloaded");
+    },
+
+    async onEditorChanged() {
+        const activeEl = this.activeNoteView?.contentEl;
+        let minimap = this.minimapInstances.get(activeEl);
+        if (!minimap) {
+            await this.updateElementMinimap(activeEl);
+            minimap = this.minimapInstances.get(activeEl);
+        }
+        if (minimap) {
+            await minimap.refreshAfterEditorChange();
+        }
+    },
+
+    getSnapshotCacheKey(filePath, mode) {
+        return `${filePath || ""}::${mode || "read"}`;
+    },
+
+    getSnapshotCache(filePath, mode) {
+        return this.snapshotCaches.get(this.getSnapshotCacheKey(filePath, mode));
+    },
+
+    setSnapshotCache(filePath, mode, cache) {
+        if (!filePath || !mode || !cache) return;
+        this.snapshotCaches.set(this.getSnapshotCacheKey(filePath, mode), cache);
+    },
+
+    getSnapshotIdentity(filePath, mode) {
+        return this.getSnapshotCache(filePath, mode);
+    },
+
+    isSnapshotCacheFresh(cache, identity = {}) {
+        if (!cache?.html) return false;
+        if (identity.mtime && cache.mtime !== identity.mtime) return false;
+        if (identity.signature && cache.signature !== identity.signature) return false;
+        return true;
     },
 };

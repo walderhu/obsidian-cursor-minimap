@@ -5,17 +5,23 @@ module.exports = {
         return this.sourceView.clientHeight === 0;
     },
 
-    modeChange() {
-        if (!this.isReadModeActive()) {
-            this.plugin.updateElementMinimap(this.element);
-            return;
+    getMode() {
+        return this.isReadModeActive() ? "read" : "edit";
+    },
+
+    getModeScroller() {
+        if (this.isReadModeActive()) {
+            return this.element.querySelector(".markdown-preview-view");
         }
 
-        this.changeScroller(
-            this.element.querySelector(
-                ".markdown-preview-view"
-            )
+        return (
+            this.element.querySelector(".markdown-source-view .cm-scroller") ||
+            this.element.querySelector(".markdown-source-view")
         );
+    },
+
+    modeChange() {
+        this.changeScroller(this.getModeScroller());
         this.updateIframe();
     },
 
@@ -37,6 +43,7 @@ module.exports = {
         await sleep(300);
         if (this.container?.style.display === "none") return;
 
+        if (!this.scroller) return;
         const visibleHeight = this.scroller.getBoundingClientRect().height;
         const sizerHeight =
             this.scroller.firstChild?.getBoundingClientRect().height || 0;
