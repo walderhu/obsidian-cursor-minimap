@@ -39,11 +39,14 @@ module.exports = {
             element.querySelector(".markdown-source-view")?.clientHeight === 0;
 
         if (!isReadMode) {
+            this.ensureEditClickZone(element);
             if (existing) {
                 existing.container.style.display = "none";
             }
             return;
         }
+
+        this.removeEditClickZone(element);
 
         if (element.classList.contains("minimap-disabled")) {
             if (existing) {
@@ -92,5 +95,42 @@ module.exports = {
         }
 
         viewActions.prepend(button);
+    },
+
+    ensureEditClickZone(element) {
+        if (element.classList.contains("minimap-disabled")) {
+            this.removeEditClickZone(element);
+            return;
+        }
+        if (element.querySelector(".minimap-edit-click-zone")) return;
+
+        const zone = document.createElement("div");
+        zone.className = "minimap-edit-click-zone";
+        zone.setAttribute("aria-hidden", "true");
+        zone.addEventListener("mousedown", (event) => {
+            if (event.button !== 0) return;
+            const scroller = element.querySelector(".markdown-source-view .cm-scroller");
+            if (!scroller) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            const rect = zone.getBoundingClientRect();
+            const ratio = Math.max(
+                0,
+                Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height))
+            );
+            const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            scroller.scrollTop = ratio * maxScroll;
+            scroller.dispatchEvent(new Event("scroll"));
+        });
+
+        element.prepend(zone);
+    },
+
+    removeEditClickZone(element) {
+        element
+            .querySelectorAll(".minimap-edit-click-zone")
+            .forEach((zone) => zone.remove());
     },
 };
