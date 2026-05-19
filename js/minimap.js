@@ -45,6 +45,7 @@ class Minimap {
         this.iframe?.removeEventListener("load", this.onIframeLoad);
         this.container.removeEventListener("mousedown", this.onMinimapMouseDown);
         this.container.removeEventListener("wheel", this.onMinimapWheel);
+        this.edgeToggle?.remove();
         document.removeEventListener("mousemove", this.onSliderMouseMove);
         document.removeEventListener("mouseup", this.onSliderMouseUp);
         document.removeEventListener("mousemove", this.onMinimapDragMove);

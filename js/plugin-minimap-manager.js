@@ -35,6 +35,16 @@ module.exports = {
         }
 
         const existing = this.minimapInstances.get(element);
+        const isReadMode =
+            element.querySelector(".markdown-source-view")?.clientHeight === 0;
+
+        if (!isReadMode) {
+            if (existing) {
+                existing.container.style.display = "none";
+            }
+            return;
+        }
+
         if (element.classList.contains("minimap-disabled")) {
             if (existing) {
                 existing.container.style.display = "none";
@@ -45,7 +55,7 @@ module.exports = {
         if (this.minimapInstances.has(element)) {
             const noteInstance = this.minimapInstances.get(element);
             noteInstance.container.style.display = "";
-            noteInstance.modeChange();
+            noteInstance.updateIframe();
         } else {
             const minimapInstance = new Minimap(
                 this,

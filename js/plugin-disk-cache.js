@@ -9,42 +9,31 @@ module.exports = {
         this.cleanupDiskCache().catch(() => {});
     },
 
-    _getCacheKey(filePath, mode = "read") {
-        return `${encodeURIComponent(filePath)}.${mode}`;
+    _getCacheKey(filePath) {
+        return encodeURIComponent(filePath);
     },
 
-    async loadFromDiskCache(filePath, mode, identity = {}) {
-        if (!this._cacheDir || !filePath) return null;
+    async loadFromDiskCache(filePath, mtime) {
+        if (!this._cacheDir || !filePath || !mtime) return null;
         try {
-            const key = this._getCacheKey(filePath, mode);
+            const key = this._getCacheKey(filePath);
             const metaPath = `${this._cacheDir}/${key}.json`;
             if (!await this.app.vault.adapter.exists(metaPath)) return null;
             const meta = JSON.parse(await this.app.vault.adapter.read(metaPath));
-            if (identity.mtime && meta.mtime !== identity.mtime) return null;
-            if (identity.signature && meta.signature !== identity.signature) return null;
+            if (meta.mtime !== mtime) return null;
             const htmlPath = `${this._cacheDir}/${key}.html`;
             if (!await this.app.vault.adapter.exists(htmlPath)) return null;
-            return {
-                html: await this.app.vault.adapter.read(htmlPath),
-                meta,
-            };
+            return await this.app.vault.adapter.read(htmlPath);
         } catch {
             return null;
         }
     },
 
-    saveToDiskCache(filePath, mode, identity, html) {
-        if (!this._cacheDir || !filePath || !html) return;
-        const key = this._getCacheKey(filePath, mode);
-        const meta = {
-            filePath,
-            mode,
-            mtime: identity?.mtime || null,
-            signature: identity?.signature || null,
-            stats: identity?.stats || null,
-        };
+    saveToDiskCache(filePath, mtime, html) {
+        if (!this._cacheDir || !filePath || !mtime || !html) return;
+        const key = this._getCacheKey(filePath);
         this.app.vault.adapter
-            .write(`${this._cacheDir}/${key}.json`, JSON.stringify(meta))
+            .write(`${this._cacheDir}/${key}.json`, JSON.stringify({ filePath, mtime }))
             .catch(() => {});
         this.app.vault.adapter
             .write(`${this._cacheDir}/${key}.html`, html)

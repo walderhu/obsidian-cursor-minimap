@@ -1,27 +1,22 @@
 const { sleep } = require("./utils");
+const { setIcon } = require("obsidian");
 
 module.exports = {
     isReadModeActive() {
         return this.sourceView.clientHeight === 0;
     },
 
-    getMode() {
-        return this.isReadModeActive() ? "read" : "edit";
-    },
-
-    getModeScroller() {
-        if (this.isReadModeActive()) {
-            return this.element.querySelector(".markdown-preview-view");
+    modeChange() {
+        if (!this.isReadModeActive()) {
+            this.plugin.updateElementMinimap(this.element);
+            return;
         }
 
-        return (
-            this.element.querySelector(".markdown-source-view .cm-scroller") ||
-            this.element.querySelector(".markdown-source-view")
+        this.changeScroller(
+            this.element.querySelector(
+                ".markdown-preview-view"
+            )
         );
-    },
-
-    modeChange() {
-        this.changeScroller(this.getModeScroller());
         this.updateIframe();
     },
 
@@ -43,7 +38,6 @@ module.exports = {
         await sleep(300);
         if (this.container?.style.display === "none") return;
 
-        if (!this.scroller) return;
         const visibleHeight = this.scroller.getBoundingClientRect().height;
         const sizerHeight =
             this.scroller.firstChild?.getBoundingClientRect().height || 0;
@@ -76,13 +70,29 @@ module.exports = {
     setupElements() {
         this.element
             .querySelectorAll(
-                ".minimap-container, .minimap-frame, .minimap-slider"
+                ".minimap-container, .minimap-frame, .minimap-slider, .minimap-edge-toggle"
             )
             .forEach((element) => element.remove());
 
         this.container = document.createElement("div");
         this.container.className = "minimap-container";
         this.element.prepend(this.container);
+
+        this.edgeToggle = document.createElement("button");
+        this.edgeToggle.className = "minimap-edge-toggle";
+        this.edgeToggle.type = "button";
+        this.edgeToggle.setAttribute("aria-label", "Hide minimap");
+        setIcon(this.edgeToggle, "chevron-right");
+        this.edgeToggle.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+        this.edgeToggle.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.toggleCollapsed();
+        });
+        this.container.appendChild(this.edgeToggle);
 
         this.iframe = document.createElement("iframe");
         this.iframe.className = "minimap-frame";
@@ -99,8 +109,24 @@ module.exports = {
         this.updateReservedWidth();
     },
 
+    toggleCollapsed() {
+        const collapsed = !this.container.classList.contains("minimap-collapsed");
+        this.container.classList.toggle("minimap-collapsed", collapsed);
+        this.edgeToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Show minimap" : "Hide minimap"
+        );
+        setIcon(this.edgeToggle, collapsed ? "chevron-left" : "chevron-right");
+        this.updateReservedWidth();
+        if (!collapsed) this.onResize();
+    },
+
     updateReservedWidth() {
         if (!this.element) return;
+        if (this.container?.classList.contains("minimap-collapsed")) {
+            this.element.style.setProperty("--cursor-minimap-reserved", "0px");
+            return;
+        }
         const width = Math.ceil(this.element.clientWidth * (this.scale || 0.12) + 12);
         this.element.style.setProperty("--cursor-minimap-reserved", `${width}px`);
     },

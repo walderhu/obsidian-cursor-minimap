@@ -63,14 +63,55 @@
     cursor: pointer;
 }
 
-.view-content:has(.minimap-container:not([style*="display: none"])) .cm-scroller,
-.view-content:has(.minimap-container:not([style*="display: none"])) .markdown-preview-view {
+.minimap-edge-toggle {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 18px;
+    height: 52px;
+    min-width: 18px;
+    min-height: 52px;
+    padding: 0;
+    transform: translateY(-50%);
+    border: 1px solid var(--background-modifier-border);
+    border-right: 0;
+    border-radius: 6px 0 0 6px;
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+    cursor: pointer;
+    pointer-events: auto;
+    z-index: 5;
+}
+
+.minimap-edge-toggle:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+
+.minimap-edge-toggle svg {
+    width: 14px;
+    height: 14px;
+}
+
+.minimap-container.minimap-collapsed {
+    overflow: visible;
+}
+
+.minimap-container.minimap-collapsed .minimap-frame,
+.minimap-container.minimap-collapsed .minimap-slider,
+.minimap-container.minimap-collapsed .minimap-click-overlay {
+    display: none !important;
+}
+
+.view-content:has(.minimap-container:not([style*="display: none"]):not(.minimap-collapsed)) .cm-scroller,
+.view-content:has(.minimap-container:not([style*="display: none"]):not(.minimap-collapsed)) .markdown-preview-view {
     padding-right: var(--cursor-minimap-reserved, 132px) !important;
     box-sizing: border-box;
 }
 
-.view-content:has(.minimap-container:not([style*="display: none"])) .cm-content,
-.view-content:has(.minimap-container:not([style*="display: none"])) .markdown-preview-sizer {
+.view-content:has(.minimap-container:not([style*="display: none"]):not(.minimap-collapsed)) .cm-content,
+.view-content:has(.minimap-container:not([style*="display: none"]):not(.minimap-collapsed)) .markdown-preview-sizer {
     padding-right: 12px !important;
     box-sizing: border-box;
 }
@@ -78,6 +119,7 @@
 /* styles/minimap-disabled.css */
 .minimap-disabled .minimap-container,
 .minimap-disabled .minimap-frame,
-.minimap-disabled .minimap-slider {
+.minimap-disabled .minimap-slider,
+.minimap-disabled .minimap-edge-toggle {
     display: none !important;
 }

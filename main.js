@@ -39,7 +39,7 @@ const { throttle } = require("./utils");
 module.exports = {
     async onload() {
         console.log("NoteMinimap Loaded");
-        this.snapshotCaches = new Map();
+        this.snapshotCache = { filePath: null, mtime: null, html: null };
 
         const resized = new Set();
         const resize = throttle(() => {
@@ -90,7 +90,7 @@ module.exports = {
         );
 
         this.debouncedUpdateMinimap = debounce(
-            () => this.onEditorChanged(),
+            () => this.updateElementMinimap(),
             700,
             false
         );
@@ -115,7 +115,7 @@ module.exports = {
                 )
             ) {
                 window.setTimeout(() => {
-                    this.snapshotCaches.clear();
+                    this.snapshotCache = { filePath: null, mtime: null, html: null };
                     const activeEl = this.activeNoteView?.contentEl;
                     if (activeEl) {
                         const minimap = this.minimapInstances.get(activeEl);
@@ -191,42 +191,6 @@ module.exports = {
         this.detachAllHelperLeaves();
 
         console.log("NoteMinimap Unloaded");
-    },
-
-    async onEditorChanged() {
-        const activeEl = this.activeNoteView?.contentEl;
-        let minimap = this.minimapInstances.get(activeEl);
-        if (!minimap) {
-            await this.updateElementMinimap(activeEl);
-            minimap = this.minimapInstances.get(activeEl);
-        }
-        if (minimap) {
-            await minimap.refreshAfterEditorChange();
-        }
-    },
-
-    getSnapshotCacheKey(filePath, mode) {
-        return `${filePath || ""}::${mode || "read"}`;
-    },
-
-    getSnapshotCache(filePath, mode) {
-        return this.snapshotCaches.get(this.getSnapshotCacheKey(filePath, mode));
-    },
-
-    setSnapshotCache(filePath, mode, cache) {
-        if (!filePath || !mode || !cache) return;
-        this.snapshotCaches.set(this.getSnapshotCacheKey(filePath, mode), cache);
-    },
-
-    getSnapshotIdentity(filePath, mode) {
-        return this.getSnapshotCache(filePath, mode);
-    },
-
-    isSnapshotCacheFresh(cache, identity = {}) {
-        if (!cache?.html) return false;
-        if (identity.mtime && cache.mtime !== identity.mtime) return false;
-        if (identity.signature && cache.signature !== identity.signature) return false;
-        return true;
     },
 };
 
@@ -325,6 +289,16 @@ module.exports = {
         }
 
         const existing = this.minimapInstances.get(element);
+        const isReadMode =
+            element.querySelector(".markdown-source-view")?.clientHeight === 0;
+
+        if (!isReadMode) {
+            if (existing) {
+                existing.container.style.display = "none";
+            }
+            return;
+        }
+
         if (element.classList.contains("minimap-disabled")) {
             if (existing) {
                 existing.container.style.display = "none";
@@ -335,7 +309,7 @@ module.exports = {
         if (this.minimapInstances.has(element)) {
             const noteInstance = this.minimapInstances.get(element);
             noteInstance.container.style.display = "";
-            noteInstance.modeChange();
+            noteInstance.updateIframe();
         } else {
             const minimapInstance = new Minimap(
                 this,
@@ -461,42 +435,31 @@ module.exports = {
         this.cleanupDiskCache().catch(() => {});
     },
 
-    _getCacheKey(filePath, mode = "read") {
-        return `${encodeURIComponent(filePath)}.${mode}`;
+    _getCacheKey(filePath) {
+        return encodeURIComponent(filePath);
     },
 
-    async loadFromDiskCache(filePath, mode, identity = {}) {
-        if (!this._cacheDir || !filePath) return null;
+    async loadFromDiskCache(filePath, mtime) {
+        if (!this._cacheDir || !filePath || !mtime) return null;
         try {
-            const key = this._getCacheKey(filePath, mode);
+            const key = this._getCacheKey(filePath);
             const metaPath = `${this._cacheDir}/${key}.json`;
             if (!await this.app.vault.adapter.exists(metaPath)) return null;
             const meta = JSON.parse(await this.app.vault.adapter.read(metaPath));
-            if (identity.mtime && meta.mtime !== identity.mtime) return null;
-            if (identity.signature && meta.signature !== identity.signature) return null;
+            if (meta.mtime !== mtime) return null;
             const htmlPath = `${this._cacheDir}/${key}.html`;
             if (!await this.app.vault.adapter.exists(htmlPath)) return null;
-            return {
-                html: await this.app.vault.adapter.read(htmlPath),
-                meta,
-            };
+            return await this.app.vault.adapter.read(htmlPath);
         } catch {
             return null;
         }
     },
 
-    saveToDiskCache(filePath, mode, identity, html) {
-        if (!this._cacheDir || !filePath || !html) return;
-        const key = this._getCacheKey(filePath, mode);
-        const meta = {
-            filePath,
-            mode,
-            mtime: identity?.mtime || null,
-            signature: identity?.signature || null,
-            stats: identity?.stats || null,
-        };
+    saveToDiskCache(filePath, mtime, html) {
+        if (!this._cacheDir || !filePath || !mtime || !html) return;
+        const key = this._getCacheKey(filePath);
         this.app.vault.adapter
-            .write(`${this._cacheDir}/${key}.json`, JSON.stringify(meta))
+            .write(`${this._cacheDir}/${key}.json`, JSON.stringify({ filePath, mtime }))
             .catch(() => {});
         this.app.vault.adapter
             .write(`${this._cacheDir}/${key}.html`, html)
@@ -691,6 +654,7 @@ class Minimap {
         this.iframe?.removeEventListener("load", this.onIframeLoad);
         this.container.removeEventListener("mousedown", this.onMinimapMouseDown);
         this.container.removeEventListener("wheel", this.onMinimapWheel);
+        this.edgeToggle?.remove();
         document.removeEventListener("mousemove", this.onSliderMouseMove);
         document.removeEventListener("mouseup", this.onSliderMouseUp);
         document.removeEventListener("mousemove", this.onMinimapDragMove);
@@ -759,29 +723,24 @@ module.exports = {
 },
 "js/minimap-layout": function(require, module, exports) {
 const { sleep } = require("./utils");
+const { setIcon } = require("obsidian");
 
 module.exports = {
     isReadModeActive() {
         return this.sourceView.clientHeight === 0;
     },
 
-    getMode() {
-        return this.isReadModeActive() ? "read" : "edit";
-    },
-
-    getModeScroller() {
-        if (this.isReadModeActive()) {
-            return this.element.querySelector(".markdown-preview-view");
+    modeChange() {
+        if (!this.isReadModeActive()) {
+            this.plugin.updateElementMinimap(this.element);
+            return;
         }
 
-        return (
-            this.element.querySelector(".markdown-source-view .cm-scroller") ||
-            this.element.querySelector(".markdown-source-view")
+        this.changeScroller(
+            this.element.querySelector(
+                ".markdown-preview-view"
+            )
         );
-    },
-
-    modeChange() {
-        this.changeScroller(this.getModeScroller());
         this.updateIframe();
     },
 
@@ -803,7 +762,6 @@ module.exports = {
         await sleep(300);
         if (this.container?.style.display === "none") return;
 
-        if (!this.scroller) return;
         const visibleHeight = this.scroller.getBoundingClientRect().height;
         const sizerHeight =
             this.scroller.firstChild?.getBoundingClientRect().height || 0;
@@ -836,13 +794,29 @@ module.exports = {
     setupElements() {
         this.element
             .querySelectorAll(
-                ".minimap-container, .minimap-frame, .minimap-slider"
+                ".minimap-container, .minimap-frame, .minimap-slider, .minimap-edge-toggle"
             )
             .forEach((element) => element.remove());
 
         this.container = document.createElement("div");
         this.container.className = "minimap-container";
         this.element.prepend(this.container);
+
+        this.edgeToggle = document.createElement("button");
+        this.edgeToggle.className = "minimap-edge-toggle";
+        this.edgeToggle.type = "button";
+        this.edgeToggle.setAttribute("aria-label", "Hide minimap");
+        setIcon(this.edgeToggle, "chevron-right");
+        this.edgeToggle.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+        this.edgeToggle.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.toggleCollapsed();
+        });
+        this.container.appendChild(this.edgeToggle);
 
         this.iframe = document.createElement("iframe");
         this.iframe.className = "minimap-frame";
@@ -859,8 +833,24 @@ module.exports = {
         this.updateReservedWidth();
     },
 
+    toggleCollapsed() {
+        const collapsed = !this.container.classList.contains("minimap-collapsed");
+        this.container.classList.toggle("minimap-collapsed", collapsed);
+        this.edgeToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Show minimap" : "Hide minimap"
+        );
+        setIcon(this.edgeToggle, collapsed ? "chevron-left" : "chevron-right");
+        this.updateReservedWidth();
+        if (!collapsed) this.onResize();
+    },
+
     updateReservedWidth() {
         if (!this.element) return;
+        if (this.container?.classList.contains("minimap-collapsed")) {
+            this.element.style.setProperty("--cursor-minimap-reserved", "0px");
+            return;
+        }
         const width = Math.ceil(this.element.clientWidth * (this.scale || 0.12) + 12);
         this.element.style.setProperty("--cursor-minimap-reserved", `${width}px`);
     },
@@ -877,80 +867,6 @@ module.exports = {
         return view?.file || null;
     },
 
-    getCurrentView() {
-        const leaves = this.plugin.app.workspace.getLeavesOfType("markdown");
-        return leaves.map(l => l.view).find(v => v.contentEl === this.element) || null;
-    },
-
-    async getMarkdownText() {
-        const view = this.getCurrentView();
-        const file = view?.file || this.plugin.app.workspace.getActiveFile();
-        if (typeof view?.getViewData === "function") {
-            return await view.getViewData();
-        }
-        return file ? await this.plugin.app.vault.read(file) : "";
-    },
-
-    getSnapshotStats(markdown) {
-        const text = markdown || "";
-        return {
-            length: text.length,
-            lineCount: text.length ? text.split("\n").length : 0,
-            lengthBucket: Math.floor(text.length / 50),
-        };
-    },
-
-    getStatsSignature(stats) {
-        return `${stats.lineCount}:${stats.lengthBucket}`;
-    },
-
-    shouldRefreshForStats(stats, mode = this.getMode()) {
-        const currentFile = this.getCurrentFile();
-        const filePath = currentFile?.path || null;
-        const previous = this.plugin.getSnapshotIdentity?.(filePath, mode)?.stats;
-        if (!previous) return true;
-        return (
-            previous.lineCount !== stats.lineCount ||
-            previous.lengthBucket !== stats.lengthBucket
-        );
-    },
-
-    async refreshAfterEditorChange() {
-        const markdown = await this.getMarkdownText();
-        const stats = this.getSnapshotStats(markdown);
-        if (!this.shouldRefreshForStats(stats, "edit")) {
-            this.updateSliderScroll();
-            return;
-        }
-
-        await this.refreshSnapshotsForModes(["edit", "read"], stats);
-    },
-
-    async refreshSnapshotsForModes(modes, stats = null) {
-        const activeMode = this.getMode();
-        for (const mode of modes) {
-            const noteContent = await this.renderSnapshotContent(mode);
-            if (!noteContent) continue;
-            const html = this.buildSnapshotHTML(noteContent);
-            this.commitSnapshotHTML(mode, html, stats);
-            if (mode === activeMode) {
-                this.applyIframeHTML(html);
-            }
-        }
-    },
-
-    async renderSnapshotContent(mode = this.getMode()) {
-        if (mode === "edit") {
-            return await renderEditMode(
-                this.plugin,
-                this.element,
-                this.helperElement,
-                this.scroller
-            );
-        }
-        return await renderReadMode(this.plugin, this.element);
-    },
-
     async updateIframe(noteContent) {
         if (this.isUpdatingIframe) {
             this.needsIframeUpdate = true;
@@ -959,78 +875,60 @@ module.exports = {
 
         this.isUpdatingIframe = true;
 
-        let snapshotStats = null;
         try {
             if (!noteContent) {
                 const currentFile = this.getCurrentFile();
                 const mtime = currentFile?.stat?.mtime;
-                const mode = this.getMode();
-                const markdown = await this.getMarkdownText();
-                const stats = this.getSnapshotStats(markdown);
-                snapshotStats = stats;
-                const identity = {
-                    mtime,
-                    signature: mode === "edit" ? this.getStatsSignature(stats) : null,
-                    stats,
-                };
-                const cache = this.plugin.getSnapshotCache(currentFile?.path, mode);
+                const cache = this.plugin.snapshotCache;
 
                 // 1. memory cache hit
-                if (cache?.html && currentFile && this.plugin.isSnapshotCacheFresh(cache, identity)) {
-                    this.applyIframeHTML(cache.html);
+                if (cache.html && currentFile && cache.filePath === currentFile.path && cache.mtime === mtime) {
+                    if (this.iframe && cache.html !== this.lastIframeHTML) {
+                        this.lastIframeHTML = cache.html;
+                        this.hasMeasuredIframeHeight = false;
+                        this.iframe.srcdoc = cache.html;
+                    }
                     return;
                 }
 
                 // 2. disk cache hit
-                if (currentFile) {
-                    const diskCache = await this.plugin.loadFromDiskCache(currentFile.path, mode, identity);
-                    if (diskCache) {
-                        this.plugin.setSnapshotCache(currentFile.path, mode, {
-                            ...diskCache.meta,
-                            html: diskCache.html,
-                        });
-                        this.applyIframeHTML(diskCache.html);
+                if (currentFile && mtime) {
+                    const diskHtml = await this.plugin.loadFromDiskCache(currentFile.path, mtime);
+                    if (diskHtml) {
+                        this.plugin.snapshotCache = { filePath: currentFile.path, mtime, html: diskHtml };
+                        if (this.iframe && diskHtml !== this.lastIframeHTML) {
+                            this.lastIframeHTML = diskHtml;
+                            this.hasMeasuredIframeHeight = false;
+                            this.iframe.srcdoc = diskHtml;
+                        }
                         return;
                     }
                 }
 
-                noteContent = await this.renderSnapshotContent(mode);
+                noteContent = await this.getFullHTML();
             }
             if (!noteContent) return;
 
-            const html = this.buildSnapshotHTML(noteContent);
-            this.applyIframeHTML(html);
-            this.commitSnapshotHTML(this.getMode(), html, snapshotStats);
-        } finally {
-            this.isUpdatingIframe = false;
-            if (this.needsIframeUpdate) {
-                this.needsIframeUpdate = false;
-                window.setTimeout(() => this.updateIframe(), 0);
-            }
-        }
-    },
+            noteContent
+                .querySelectorAll(".minimap-frame, .minimap-slider")
+                .forEach((el) => el.remove());
+            this.syncTaskKanbanCollapse(noteContent);
 
-    buildSnapshotHTML(noteContent) {
-        noteContent
-            .querySelectorAll(".minimap-frame, .minimap-slider")
-            .forEach((el) => el.remove());
-        this.syncTaskKanbanCollapse(noteContent);
+            const stylesHTML = this.plugin.getStylesHTML();
+            const themeClass = document.body.classList.contains("theme-dark")
+                ? "theme-dark"
+                : "theme-light";
+            const cssVars = this.plugin.getCssVars();
+            const sizerHeight =
+                this.scroller?.firstChild?.getBoundingClientRect().height || 0;
+            const scrollHeight = this.scroller?.scrollHeight || 0;
+            const bottomOverscrollHeight = Math.max(
+                0,
+                this.bottomOverscrollHeight || scrollHeight - sizerHeight
+            );
+            this.bottomOverscrollHeight = bottomOverscrollHeight;
 
-        const stylesHTML = this.plugin.getStylesHTML();
-        const themeClass = document.body.classList.contains("theme-dark")
-            ? "theme-dark"
-            : "theme-light";
-        const cssVars = this.plugin.getCssVars();
-        const sizerHeight =
-            this.scroller?.firstChild?.getBoundingClientRect().height || 0;
-        const scrollHeight = this.scroller?.scrollHeight || 0;
-        const bottomOverscrollHeight = Math.max(
-            0,
-            this.bottomOverscrollHeight || scrollHeight - sizerHeight
-        );
-        this.bottomOverscrollHeight = bottomOverscrollHeight;
-
-        return `
+            const html = `
 		<!DOCTYPE html>
 		<html>
 		<head>${stylesHTML}<style>${cssVars}
@@ -1053,32 +951,27 @@ module.exports = {
 		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
 		</html>
 	`;
-    },
 
-    applyIframeHTML(html) {
-        if (this.iframe && html !== this.lastIframeHTML) {
-            this.lastIframeHTML = html;
-            this.hasMeasuredIframeHeight = false;
-            this.iframe.srcdoc = html;
+            if (this.iframe && html !== this.lastIframeHTML) {
+                this.lastIframeHTML = html;
+                this.hasMeasuredIframeHeight = false;
+                this.iframe.srcdoc = html;
+                const cacheFile = this.getCurrentFile();
+                const cacheMtime = cacheFile?.stat?.mtime || null;
+                this.plugin.snapshotCache = {
+                    filePath: cacheFile?.path || null,
+                    mtime: cacheMtime,
+                    html,
+                };
+                this.plugin.saveToDiskCache(cacheFile?.path, cacheMtime, html);
+            }
+        } finally {
+            this.isUpdatingIframe = false;
+            if (this.needsIframeUpdate) {
+                this.needsIframeUpdate = false;
+                window.setTimeout(() => this.updateIframe(), 0);
+            }
         }
-    },
-
-    commitSnapshotHTML(mode, html, stats = null) {
-        const cacheFile = this.getCurrentFile();
-        const cacheMtime = cacheFile?.stat?.mtime || null;
-        const identityStats = stats || { length: 0, lineCount: 0, lengthBucket: 0 };
-        const identity = {
-            mtime: cacheMtime,
-            signature: mode === "edit" ? this.getStatsSignature(identityStats) : null,
-            stats: identityStats,
-        };
-        this.plugin.setSnapshotCache(cacheFile?.path, mode, {
-            filePath: cacheFile?.path || null,
-            mode,
-            ...identity,
-            html,
-        });
-        this.plugin.saveToDiskCache(cacheFile?.path, mode, identity, html);
     },
 
     async prerenderForCache() {
@@ -1086,9 +979,58 @@ module.exports = {
         const currentFile = this.getCurrentFile();
         if (!currentFile) return;
 
-        const markdown = await this.getMarkdownText();
-        const stats = this.getSnapshotStats(markdown);
-        await this.refreshSnapshotsForModes(["read", "edit"], stats);
+        const noteContent = await renderReadMode(this.plugin, this.element);
+        if (!noteContent) return;
+
+        noteContent
+            .querySelectorAll(".minimap-frame, .minimap-slider")
+            .forEach((el) => el.remove());
+        this.syncTaskKanbanCollapse(noteContent);
+
+        const stylesHTML = this.plugin.getStylesHTML();
+        const themeClass = document.body.classList.contains("theme-dark")
+            ? "theme-dark"
+            : "theme-light";
+        const cssVars = this.plugin.getCssVars();
+        const sizerHeight =
+            this.scroller?.firstChild?.getBoundingClientRect().height || 0;
+        const scrollHeight = this.scroller?.scrollHeight || 0;
+        const bottomOverscrollHeight = Math.max(
+            0,
+            this.bottomOverscrollHeight || scrollHeight - sizerHeight
+        );
+
+        const html = `
+		<!DOCTYPE html>
+		<html>
+		<head>${stylesHTML}<style>${cssVars}
+        body { display: flex; flex-direction: column; min-height: 100%; }
+        .cursor-minimap-bottom-overscroll {
+            flex: 1 0 auto;
+            min-height: ${bottomOverscrollHeight}px;
+            background: #161616;
+        }
+        .markdown-reading-view,
+        .markdown-preview-view,
+        .markdown-preview-sizer,
+        .markdown-preview-section {
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }
+        </style></head>
+		<body style="background-color:${this.backgroundColor}" class="${themeClass} show-inline-title">${noteContent.innerHTML}<div class="cursor-minimap-bottom-overscroll"></div></body>
+		</html>
+	`;
+
+        const cacheMtime = currentFile.stat?.mtime || null;
+        this.plugin.snapshotCache = {
+            filePath: currentFile.path,
+            mtime: cacheMtime,
+            html,
+        };
+        this.plugin.saveToDiskCache(currentFile.path, cacheMtime, html);
     },
 
     onIframeLoad() {
@@ -1146,7 +1088,8 @@ module.exports = {
     },
 
     async getFullHTML() {
-        return await this.renderSnapshotContent(this.getMode());
+        if (!this.isReadModeActive()) return null;
+        return await renderReadMode(this.plugin, this.element);
     },
 };
 
@@ -1154,7 +1097,19 @@ module.exports = {
 "js/minimap-scroll": function(require, module, exports) {
 module.exports = {
     getMinimapDragZoneRect() {
-        return this.container?.getBoundingClientRect() || null;
+        const rect = this.container?.getBoundingClientRect();
+        if (!rect) return null;
+
+        const scale = this.yScale || this.scale || 0.12;
+        const width = Math.max(1, rect.width * scale);
+        return {
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.right - width,
+            width,
+            height: rect.height,
+        };
     },
 
     isPointerInsideMinimapDragZone(event) {
@@ -1253,11 +1208,13 @@ module.exports = {
 
     minimapScrollToY(clientY) {
         if (!this.yScale || !this.scroller) return;
-        const rect = this.container.getBoundingClientRect();
+        const rect = this.getMinimapDragZoneRect();
+        if (!rect) return;
         const minimapY = (clientY - rect.top) + (this.minimapScrollTop || 0) - (this.topOffset || 0);
         const documentY = minimapY / this.yScale;
         const maxScroll = Math.max(0, this.scroller.scrollHeight - this.scroller.clientHeight);
         this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, documentY - this.scroller.clientHeight / 2));
+        this.scroller.dispatchEvent(new Event("scroll"));
         this.updateSliderScroll();
     },
 

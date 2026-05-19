@@ -1,6 +1,18 @@
 module.exports = {
     getMinimapDragZoneRect() {
-        return this.container?.getBoundingClientRect() || null;
+        const rect = this.container?.getBoundingClientRect();
+        if (!rect) return null;
+
+        const scale = this.yScale || this.scale || 0.12;
+        const width = Math.max(1, rect.width * scale);
+        return {
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.right - width,
+            width,
+            height: rect.height,
+        };
     },
 
     isPointerInsideMinimapDragZone(event) {
@@ -99,11 +111,13 @@ module.exports = {
 
     minimapScrollToY(clientY) {
         if (!this.yScale || !this.scroller) return;
-        const rect = this.container.getBoundingClientRect();
+        const rect = this.getMinimapDragZoneRect();
+        if (!rect) return;
         const minimapY = (clientY - rect.top) + (this.minimapScrollTop || 0) - (this.topOffset || 0);
         const documentY = minimapY / this.yScale;
         const maxScroll = Math.max(0, this.scroller.scrollHeight - this.scroller.clientHeight);
         this.scroller.scrollTop = Math.max(0, Math.min(maxScroll, documentY - this.scroller.clientHeight / 2));
+        this.scroller.dispatchEvent(new Event("scroll"));
         this.updateSliderScroll();
     },
 
